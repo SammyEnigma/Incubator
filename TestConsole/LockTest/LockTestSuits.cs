@@ -5,15 +5,19 @@ using System.Runtime.CompilerServices;
 namespace TestConsole.LockTest
 {
     [ClrJob, CoreJob]
-    public class SimpleSpinLockTest
+    public class LockTestSuits
     {
         private int _resource;
+        // 简单的自旋锁
         private SimpleSpinLock sslock;
+        // 简单的等待锁（基于AutoResetEvent）
+        private SimpleWaitLock swlock;
 
-        public SimpleSpinLockTest()
+        public LockTestSuits()
         {
             _resource = 0;
             sslock = new SimpleSpinLock();
+            swlock = new SimpleWaitLock();
         }
 
         [Benchmark]
@@ -34,6 +38,20 @@ namespace TestConsole.LockTest
             sslock.Enter();
             _resource++;
             sslock.Leave();
+        }
+
+        [Benchmark]
+        public void AccessBySWLock()
+        {
+            sslock.Enter();
+            _resource++;
+            sslock.Leave();
+        }
+
+        [GlobalCleanup]
+        public void GlobalCleanup()
+        {
+            swlock.Dispose();
         }
 
         [MethodImpl(MethodImplOptions.NoInlining)]

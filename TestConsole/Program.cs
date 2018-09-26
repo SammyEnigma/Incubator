@@ -8,7 +8,7 @@ namespace TestConsole
     {
         static void Main(string[] args)
         {
-            var summary = BenchmarkRunner.Run<SimpleSpinLockTest>();
+            var summary = BenchmarkRunner.Run<LockTestSuits>();
             Console.Read();
         }
     }
