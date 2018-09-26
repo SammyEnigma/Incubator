@@ -1,8 +1,6 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
+﻿using BenchmarkDotNet.Running;
+using System;
+using TestConsole.LockTest;
 
 namespace TestConsole
 {
@@ -10,6 +8,7 @@ namespace TestConsole
     {
         static void Main(string[] args)
         {
+            var summary = BenchmarkRunner.Run<SimpleSpinLockTest>();
             Console.Read();
         }
     }

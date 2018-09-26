@@ -11,7 +11,7 @@ Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "Buffer", "Buffer\Buffer.csp
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Locks", "Locks\Locks.csproj", "{BAD4AB5D-F389-4ADE-81E3-D258C0F4CE29}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "TestConsole", "TestConsole\TestConsole.csproj", "{327737BE-9D75-4CA9-8694-427D7F6B96E4}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "TestConsole", "TestConsole\TestConsole.csproj", "{93F6B673-E46A-4C8E-844D-798C3231755E}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
@@ -35,10 +35,10 @@ Global
 		{BAD4AB5D-F389-4ADE-81E3-D258C0F4CE29}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{BAD4AB5D-F389-4ADE-81E3-D258C0F4CE29}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{BAD4AB5D-F389-4ADE-81E3-D258C0F4CE29}.Release|Any CPU.Build.0 = Release|Any CPU
-		{327737BE-9D75-4CA9-8694-427D7F6B96E4}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
-		{327737BE-9D75-4CA9-8694-427D7F6B96E4}.Debug|Any CPU.Build.0 = Debug|Any CPU
-		{327737BE-9D75-4CA9-8694-427D7F6B96E4}.Release|Any CPU.ActiveCfg = Release|Any CPU
-		{327737BE-9D75-4CA9-8694-427D7F6B96E4}.Release|Any CPU.Build.0 = Release|Any CPU
+		{93F6B673-E46A-4C8E-844D-798C3231755E}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{93F6B673-E46A-4C8E-844D-798C3231755E}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{93F6B673-E46A-4C8E-844D-798C3231755E}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{93F6B673-E46A-4C8E-844D-798C3231755E}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE

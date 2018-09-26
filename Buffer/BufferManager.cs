@@ -3,7 +3,7 @@ using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Linq;
 
-namespace EventStore.BufferManagement
+namespace Incubator.Buffer
 {
     /// <summary>
     /// A manager to handle buffers for the socket connections
