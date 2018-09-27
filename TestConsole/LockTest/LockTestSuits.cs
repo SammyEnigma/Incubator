@@ -1,6 +1,7 @@
 ﻿using BenchmarkDotNet.Attributes;
 using Incubator.Locks;
 using System.Runtime.CompilerServices;
+using System.Threading;
 
 namespace TestConsole.LockTest
 {
@@ -12,28 +13,35 @@ namespace TestConsole.LockTest
         private SimpleSpinLock sslock;
         // 简单的等待锁（基于AutoResetEvent）
         private SimpleWaitLock swlock;
+        // 简单的等待锁（基于Semaphore）
+        private SimpleWaitWithSemaphoreLock semaphorelock;
+        // 互斥锁
+        private Mutex mutex;
+        // 简单的递归锁
+        private RecursiveAutoResetEventLock recursivelock;
 
         public LockTestSuits()
         {
             _resource = 0;
             sslock = new SimpleSpinLock();
             swlock = new SimpleWaitLock();
+            semaphorelock = new SimpleWaitWithSemaphoreLock();
+            mutex = new Mutex();
+            recursivelock = new RecursiveAutoResetEventLock();
         }
 
-        [Benchmark]
         public void AccessDirectly()
         {
             _resource++;
         }
 
-        [Benchmark]
         public void AccessByMethod()
         {
             M();
         }
 
         [Benchmark]
-        public void AccessBySSLock()
+        public void AccessBySimpleSpinLock()
         {
             sslock.Enter();
             _resource++;
@@ -41,17 +49,43 @@ namespace TestConsole.LockTest
         }
 
         [Benchmark]
-        public void AccessBySWLock()
+        public void AccessBySimpleWaitLock()
         {
-            sslock.Enter();
+            swlock.Enter();
             _resource++;
-            sslock.Leave();
+            swlock.Leave();
+        }
+
+        [Benchmark]
+        public void AccessBySemaphoreLock()
+        {
+            semaphorelock.Enter();
+            _resource++;
+            semaphorelock.Leave();
+        }
+
+        [Benchmark]
+        public void AccessByMutex()
+        {
+            mutex.WaitOne();
+            _resource++;
+            mutex.ReleaseMutex();
+        }
+
+        [Benchmark]
+        public void AccessByRecursiveLock()
+        {
+            recursivelock.Enter();
+            _resource++;
+            recursivelock.Leave();
         }
 
         [GlobalCleanup]
         public void GlobalCleanup()
         {
             swlock.Dispose();
+            semaphorelock.Dispose();
+            mutex.Dispose();
         }
 
         [MethodImpl(MethodImplOptions.NoInlining)]
