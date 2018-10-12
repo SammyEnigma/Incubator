@@ -23,45 +23,12 @@ namespace Incubator.Buffer
     public class BufferManager
     {
         private const int TrialsCount = 100;
-
-        private static BufferManager _defaultBufferManager;
-
         private readonly int _segmentChunks;
         private readonly int _chunkSize;
         private readonly int _segmentSize;
-        private readonly bool _allowedToCreateMemory;
-
         private readonly ConcurrentStack<ArraySegment<byte>> _buffers = new ConcurrentStack<ArraySegment<byte>>();
-
         private readonly List<byte[]> _segments;
         private readonly object _creatingNewSegmentLock = new object();
-
-        /// <summary>
-        /// Gets the default buffer manager
-        /// </summary>
-        /// <remarks>You should only be using this method if you don't want to manage buffers on your own.</remarks>
-        /// <value>The default buffer manager.</value>
-        public static BufferManager Default
-        {
-            get
-            {
-                //default to 1024 1kb buffers if people don't want to manage it on their own;
-                if (_defaultBufferManager == null)
-                    _defaultBufferManager = new BufferManager(1024, 1024, 1);
-                return _defaultBufferManager;
-            }
-        }
-
-        /// <summary>
-        /// Sets the default buffer manager.
-        /// </summary>
-        /// <param name="manager">The new default buffer manager.</param>
-        public static void SetDefaultBufferManager(BufferManager manager)
-        {
-            if (manager == null)
-                throw new ArgumentNullException("manager");
-            _defaultBufferManager = manager;
-        }
 
         public int ChunkSize
         {
@@ -109,16 +76,6 @@ namespace Incubator.Buffer
         /// <param name="chunkSize">The size of a chunk in bytes</param>
         /// <param name="initialSegments">The initial number of segments to create</param>
         public BufferManager(int segmentChunks, int chunkSize, int initialSegments)
-            : this(segmentChunks, chunkSize, initialSegments, true) { }
-
-        /// <summary>
-        /// Constructs a new <see cref="BufferManager"></see> object
-        /// </summary>
-        /// <param name="segmentChunks">The number of chunks to create per segment</param>
-        /// <param name="chunkSize">The size of a chunk in bytes</param>
-        /// <param name="initialSegments">The initial number of segments to create</param>
-        /// <param name="allowedToCreateMemory">If false when empty and checkout is called an exception will be thrown</param>
-        public BufferManager(int segmentChunks, int chunkSize, int initialSegments, bool allowedToCreateMemory)
         {
             if (segmentChunks <= 0)
                 throw new ArgumentException("segmentChunks");
@@ -132,25 +89,20 @@ namespace Incubator.Buffer
             _segmentSize = _segmentChunks * _chunkSize;
 
             _segments = new List<byte[]>();
-
-            _allowedToCreateMemory = true;
             for (int i = 0; i < initialSegments; i++)
             {
-                CreateNewSegment(true);
+                CreateNewSegment();
             }
-            _allowedToCreateMemory = allowedToCreateMemory;
         }
 
         /// <summary>
         /// Creates a new segment, makes buffers available
         /// </summary>
-        private void CreateNewSegment(bool forceCreation)
+        private void CreateNewSegment()
         {
-            if (!_allowedToCreateMemory)
-                throw new Exception("Unable To Create Memory");
             lock (_creatingNewSegmentLock)
             {
-                if (!forceCreation && _buffers.Count > _segmentChunks / 2)
+                if (_buffers.Count > _segmentChunks / 2)
                     return;
 
                 var bytes = new byte[_segmentSize];
@@ -179,7 +131,7 @@ namespace Incubator.Buffer
                 ArraySegment<byte> result;
                 if (_buffers.TryPop(out result))
                     return result;
-                CreateNewSegment(false);
+                CreateNewSegment();
                 trial++;
             }
             throw new Exception("Unable To Allocate Buffer");
@@ -213,7 +165,7 @@ namespace Incubator.Buffer
                     }
                     if (totalReceived == toGet)
                         return result;
-                    CreateNewSegment(false);
+                    CreateNewSegment();
                     count++;
                 }
                 throw new Exception("Unable To Allocate Buffer");
