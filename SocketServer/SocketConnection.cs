@@ -49,7 +49,12 @@ namespace Incubator.SocketServer
             Task.Factory.StartNew(() =>
             {
                 var readEventArgs = _socketListener.SocketAsyncReceiveEventArgsPool.Pop();
-                readEventArgs.Completed += IO_Completed;
+                // 如果saea没有socket操作，意味着该对象没有绑定过事件handler
+                // todo: 此种判定方式比较优雅，但是正确性没有经过检验
+                if (readEventArgs.LastOperation == SocketAsyncOperation.None)
+                {
+                    readEventArgs.Completed += IO_Completed;
+                }
                 var willRaiseEvent = _socket.ReceiveAsync(readEventArgs);
                 if (!willRaiseEvent)
                 {
@@ -272,7 +277,13 @@ namespace Incubator.SocketServer
             ArrayPool<byte>.Shared.Return(messageData);
 
             var sendEventArgs = _socketListener.SocketAsyncSendEventArgsPool.Pop();
-            sendEventArgs.Completed += IO_Completed;
+            // 如果saea没有socket操作，意味着该对象没有绑定过事件handler
+            // todo: 此种判定方式比较优雅，但是正确性没有经过检验
+            if (sendEventArgs.LastOperation == SocketAsyncOperation.None)
+            {
+                sendEventArgs.Completed += IO_Completed;
+            }
+            
             var willRaiseEvent = _socket.SendAsync(sendEventArgs);
             if (!willRaiseEvent)
             {
