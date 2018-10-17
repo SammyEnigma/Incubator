@@ -7,12 +7,12 @@ using System.Threading;
 
 namespace Incubator.SocketServer
 {
-    internal class SocketListener
+    public class SocketListener
     {
-        private object _lockobj;
         private Socket _socket;
         private int _bufferSize;
         private int _maxConnectionCount;
+        private ManualResetEventSlim _shutdownEvent;
         internal volatile int ConnectedCount;
         internal Thread SendMessageWorker;
         internal SemaphoreSlim AcceptedClientsSemaphore;
@@ -21,18 +21,17 @@ namespace Incubator.SocketServer
         internal SocketAsyncEventArgsPool SocketAsyncReceiveEventArgsPool;
         internal SocketAsyncEventArgsPool SocketAsyncSendEventArgsPool;
         #region 事件
-        internal event EventHandler OnServerStarting;
-        internal event EventHandler OnServerStarted;
-        internal event EventHandler<string> OnConnectionCreated;
-        internal event EventHandler<string> OnServerStopping;
-        internal event EventHandler<string> OnServerStopped;
-        internal event EventHandler<byte[]> OnSendMessage;
+        public event EventHandler OnServerStarting;
+        public event EventHandler OnServerStarted;
+        public event EventHandler<string> OnConnectionCreated;
+        public event EventHandler<string> OnServerStopping;
+        public event EventHandler<string> OnServerStopped;
+        public event EventHandler<byte[]> OnSendMessage;
         #endregion
         internal ConcurrentDictionary<int, SocketConnection> ConnectionList;
 
         public SocketListener(int maxConnectionCount, int bufferSize)
         {
-            _lockobj = new object();
             _bufferSize = bufferSize;
             _maxConnectionCount = 0;
             _maxConnectionCount = maxConnectionCount;
@@ -40,6 +39,7 @@ namespace Incubator.SocketServer
             ConnectionList = new ConcurrentDictionary<int, SocketConnection>();
             SendingQueue = new BlockingCollection<byte[]>();
             SendMessageWorker = new Thread(PorcessMessageQueue);
+            _shutdownEvent = new ManualResetEventSlim(true);
             AcceptedClientsSemaphore = new SemaphoreSlim(maxConnectionCount, maxConnectionCount);
 
             SocketAsyncEventArgs socketAsyncEventArgs = null;
@@ -68,12 +68,25 @@ namespace Incubator.SocketServer
 
         public void Stop()
         {
+            _shutdownEvent.Set();
+
+            // 处理队列中剩余的消息
+            byte[] messageData;
+            while (SendingQueue.TryTake(out messageData))
+            {
+                if (messageData != null)
+                {
+                    OnSendMessage?.Invoke(this, messageData);
+                }
+            }
+
+            // 关闭所有连接
             SocketConnection conn;
             foreach (var key in ConnectionList.Keys)
             {
                 if (ConnectionList.TryRemove(key, out conn))
                 {
-                    conn.Stop();
+                    conn.Dispose();
                 }
             }
             _socket.Close();
@@ -82,6 +95,12 @@ namespace Incubator.SocketServer
 
         private void StartAccept(SocketAsyncEventArgs acceptEventArg = null)
         {
+            if (_shutdownEvent.Wait(0)) // 仅检查标志，立即返回
+            {
+                // 关闭事件触发，退出loop
+                return;
+            }
+
             if (acceptEventArg == null)
             {
                 acceptEventArg = new SocketAsyncEventArgs();
@@ -107,16 +126,30 @@ namespace Incubator.SocketServer
 
         private void ProcessAccept(SocketAsyncEventArgs e)
         {
+            if (_shutdownEvent.Wait(0)) // 仅检查标志，立即返回
+            {
+                // 关闭事件触发，退出loop
+                return;
+            }
+
+            SocketConnection connection = null;
             try
             {
                 Interlocked.Increment(ref ConnectedCount);
-                SocketConnection connection = new SocketConnection(e.AcceptSocket, this);
+                connection = new SocketConnection(e.AcceptSocket, this);
                 ConnectionList.TryAdd(ConnectedCount, connection);
                 connection.Start();
             }
             catch (SocketException ex)
             {
                 Console.WriteLine(ex.Message);
+            }
+            catch (ConnectionAbortedException ex)
+            {
+                Console.WriteLine(ex.Message);
+                connection.Close();
+                AcceptedClientsSemaphore.Release();
+                Interlocked.Decrement(ref ConnectedCount);
             }
             catch (Exception ex)
             {
@@ -130,6 +163,12 @@ namespace Incubator.SocketServer
         {
             while (true)
             {
+                if (_shutdownEvent.Wait(0)) // 仅检查标志，立即返回
+                {
+                    // 关闭事件触发，退出loop
+                    return;
+                }
+
                 var messageData = SendingQueue.Take();
                 if (messageData != null)
                 {

@@ -10,6 +10,23 @@ namespace Incubator.SocketServer
     public interface IConnection
     { }
 
+    public class ConnectionAbortedException : OperationCanceledException
+    {
+        public ConnectionAbortedException() :
+            this("The connection was aborted")
+        {
+
+        }
+
+        public ConnectionAbortedException(string message) : base(message)
+        {
+        }
+
+        public ConnectionAbortedException(string message, Exception inner) : base(message, inner)
+        {
+        }
+    }
+
     internal class SocketConnection : IConnection
     {
         private enum ParseEnum
@@ -20,9 +37,15 @@ namespace Incubator.SocketServer
             Find_Body = 4
         }
 
-        private Socket _socket;
-        private SocketListener _socketListener;
-        ParseEnum status = ParseEnum.Received;
+        const int NOT_STARTED = 1;
+        const int STARTED = 2;
+        const int SHUTTING_DOWN = 3;
+        const int SHUTDOWN = 4;
+        volatile int _execState;
+
+        Socket _socket;
+        SocketListener _socketListener;
+        ParseEnum _parseStatus;
         byte[] headBuffer = null;
         byte[] bodyBuffer = null;
         int maxMessageLength = 512;
@@ -38,9 +61,11 @@ namespace Incubator.SocketServer
 
         public SocketConnection(Socket socket, SocketListener listener)
         {
+            _execState = NOT_STARTED;
             _socket = socket;
             _socketListener = listener;
             _socketListener.OnSendMessage += SendMessage;
+            _parseStatus = ParseEnum.Received;
             Interlocked.Increment(ref  _socketListener.ConnectedCount);
         }
 
@@ -48,6 +73,7 @@ namespace Incubator.SocketServer
         {
             Task.Factory.StartNew(() =>
             {
+                Interlocked.CompareExchange(ref _execState, STARTED, NOT_STARTED);
                 var readEventArgs = _socketListener.SocketAsyncReceiveEventArgsPool.Pop();
                 // 如果saea没有socket操作，意味着该对象没有绑定过事件handler
                 // todo: 此种判定方式比较优雅，但是正确性没有经过检验
@@ -66,8 +92,14 @@ namespace Incubator.SocketServer
             _socketListener.Scheduler);
         }
 
-        public void Stop()
+        public void Dispose()
         {
+            Close();
+        }
+
+        public void Close()
+        {
+            Interlocked.CompareExchange(ref _execState, SHUTTING_DOWN, STARTED);
             // close the socket associated with the client
             try
             {
@@ -79,14 +111,17 @@ namespace Incubator.SocketServer
             }
 
             _socket.Close();
-            //_socketListener.AcceptedClientsSemaphore.Release();
-            //Interlocked.Decrement(ref _socketListener.ConnectedSocketCount);
-            //_socketListener.SocketAsyncReceiveEventArgsPool.Push(e);
+            Interlocked.CompareExchange(ref _execState, SHUTDOWN, SHUTTING_DOWN);
         }
 
         private void ProcessReceive(SocketAsyncEventArgs e)
         {
-            switch (status)
+            if (_execState >= SHUTTING_DOWN)
+            {
+                return;
+            }
+
+            switch (_parseStatus)
             {
                 case ParseEnum.Received:
                     {
@@ -98,17 +133,17 @@ namespace Incubator.SocketServer
                             // 接收到FIN
                             if (read == 0)
                             {
-                                CloseClientSocket(e);
+                                InnerClose(e);
                                 return;
                             }
 
                             remainingBytesToProcess = read;
-                            status = ParseEnum.Process_Head;
+                            _parseStatus = ParseEnum.Process_Head;
                         }
                         else
                         {
-                            CloseClientSocket(e);
-                            return;
+                            InnerClose(e);
+                            throw new ConnectionAbortedException("e.SocketError != SocketError.Success");
                         }
                     }
                     break;
@@ -137,12 +172,11 @@ namespace Incubator.SocketServer
                                 ArrayPool<byte>.Shared.Return(headBuffer, true);
                                 if (messageLength > maxMessageLength)
                                 {
-                                    // 消息长度超过最大限制，直接丢弃
-                                    CloseClientSocket(e);
-                                    return;
+                                    InnerClose(e);
+                                    throw new ConnectionAbortedException("消息长度超过最大限制，直接丢弃");
                                 }
 
-                                status = ParseEnum.Process_Body;
+                                _parseStatus = ParseEnum.Process_Body;
                             }
                             else
                             {
@@ -159,14 +193,14 @@ namespace Incubator.SocketServer
 
                                 offset = 0;
 
-                                status = ParseEnum.Received;
+                                _parseStatus = ParseEnum.Received;
                                 // 开始新一次recv
                                 DoReceive(e);
                             }
                         }
                         else
                         {
-                            status = ParseEnum.Process_Body;
+                            _parseStatus = ParseEnum.Process_Body;
                         }
                     }
                     break;
@@ -190,7 +224,7 @@ namespace Incubator.SocketServer
                             messageBytesDoneCount += messageBytesDoneThisOp;
                             remainingBytesToProcess = remainingBytesToProcess - messageBytesDoneThisOp;
 
-                            status = ParseEnum.Find_Body;
+                            _parseStatus = ParseEnum.Find_Body;
                         }
                         else
                         {
@@ -207,7 +241,7 @@ namespace Incubator.SocketServer
 
                             offset = 0;
 
-                            status = ParseEnum.Received;
+                            _parseStatus = ParseEnum.Received;
                             // 开始新一次recv
                             DoReceive(e);
                         }
@@ -218,7 +252,7 @@ namespace Incubator.SocketServer
                         ProcessMessage(bodyBuffer);
                         if (remainingBytesToProcess == 0)
                         {
-                            status = ParseEnum.Received;
+                            _parseStatus = ParseEnum.Received;
                             // 开始新一次recv
                             DoReceive(e);
                         }
@@ -231,7 +265,7 @@ namespace Incubator.SocketServer
                             prefixBytesDoneThisOp = 0;
                             messageBytesDoneCount = 0;
                             messageBytesDoneThisOp = 0;
-                            status = ParseEnum.Process_Head;
+                            _parseStatus = ParseEnum.Process_Head;
                         }
                     }
                     break;
@@ -248,21 +282,8 @@ namespace Incubator.SocketServer
             }
         }
 
-        private void CloseClientSocket(SocketAsyncEventArgs e)
+        private void InnerClose(SocketAsyncEventArgs e)
         {
-            // close the socket associated with the client
-            try
-            {
-                e.AcceptSocket.Shutdown(SocketShutdown.Send);
-            }
-            // throws if client process has already closed
-            catch
-            {
-            }
-
-            e.AcceptSocket.Close();
-            _socketListener.AcceptedClientsSemaphore.Release();
-            Interlocked.Decrement(ref _socketListener.ConnectedCount);
             _socketListener.SocketAsyncReceiveEventArgsPool.Push(e);
         }
 
