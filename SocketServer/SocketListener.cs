@@ -7,6 +7,24 @@ using System.Threading;
 
 namespace Incubator.SocketServer
 {
+    public class Package
+    {
+        internal SocketConnection connection { set; get; }
+        public byte[] MessageData { set; get; }
+    }
+
+    public class ConnectionInfo
+    {
+        public int Num { set; get; }
+        public string Description { set; get; }
+        public DateTime Time { set; get; }
+
+        public override string ToString()
+        {
+            return string.Format("Id：{0}，描述：{1}，时间：{2}", Num, Description, Time);
+        }
+    }
+
     public class SocketListener
     {
         private Socket _socket;
@@ -16,17 +34,21 @@ namespace Incubator.SocketServer
         internal volatile int ConnectedCount;
         internal Thread SendMessageWorker;
         internal SemaphoreSlim AcceptedClientsSemaphore;
-        internal BlockingCollection<byte[]> SendingQueue;
+        internal BlockingCollection<Package> SendingQueue;
         internal IOCompletionPortTaskScheduler Scheduler;
         internal SocketAsyncEventArgsPool SocketAsyncReceiveEventArgsPool;
         internal SocketAsyncEventArgsPool SocketAsyncSendEventArgsPool;
         #region 事件
         public event EventHandler OnServerStarting;
         public event EventHandler OnServerStarted;
-        public event EventHandler<string> OnConnectionCreated;
-        public event EventHandler<string> OnServerStopping;
-        public event EventHandler<string> OnServerStopped;
-        public event EventHandler<byte[]> OnSendMessage;
+        public event EventHandler<ConnectionInfo> OnConnectionCreated;
+        public event EventHandler<ConnectionInfo> OnConnectionClosed;
+        public event EventHandler<ConnectionInfo> OnConnectionAborted;
+        public event EventHandler OnServerStopping;
+        public event EventHandler OnServerStopped;
+        public event EventHandler<Package> OnMessageSending;
+        internal event EventHandler<Package> Sending;
+        public event EventHandler<Package> OnMessageSent;
         #endregion
         internal ConcurrentDictionary<int, SocketConnection> ConnectionList;
 
@@ -37,7 +59,7 @@ namespace Incubator.SocketServer
             _maxConnectionCount = maxConnectionCount;
             Scheduler = new IOCompletionPortTaskScheduler(12, 12);
             ConnectionList = new ConcurrentDictionary<int, SocketConnection>();
-            SendingQueue = new BlockingCollection<byte[]>();
+            SendingQueue = new BlockingCollection<Package>();
             SendMessageWorker = new Thread(PorcessMessageQueue);
             _shutdownEvent = new ManualResetEventSlim(true);
             AcceptedClientsSemaphore = new SemaphoreSlim(maxConnectionCount, maxConnectionCount);
@@ -59,24 +81,27 @@ namespace Incubator.SocketServer
 
         public void Start(IPEndPoint localEndPoint)
         {
+            OnServerStarting?.Invoke(this, EventArgs.Empty);
             _socket = new Socket(localEndPoint.AddressFamily, SocketType.Stream, ProtocolType.Tcp);
             _socket.Bind(localEndPoint);
             _socket.Listen(500);
             SendMessageWorker.Start();
+            OnServerStarted?.Invoke(this, EventArgs.Empty);
             StartAccept();
         }
 
         public void Stop()
         {
             _shutdownEvent.Set();
+            OnServerStopping?.Invoke(this, EventArgs.Empty);
 
             // 处理队列中剩余的消息
-            byte[] messageData;
-            while (SendingQueue.TryTake(out messageData))
+            Package package;
+            while (SendingQueue.TryTake(out package))
             {
-                if (messageData != null)
+                if (package != null)
                 {
-                    OnSendMessage?.Invoke(this, messageData);
+                    OnMessageSending?.Invoke(this, package);
                 }
             }
 
@@ -91,6 +116,7 @@ namespace Incubator.SocketServer
             }
             _socket.Close();
             Dispose();
+            OnServerStopped?.Invoke(this, EventArgs.Empty);
         }
 
         private void StartAccept(SocketAsyncEventArgs acceptEventArg = null)
@@ -136,9 +162,11 @@ namespace Incubator.SocketServer
             try
             {
                 Interlocked.Increment(ref ConnectedCount);
-                connection = new SocketConnection(e.AcceptSocket, this);
+                connection = new SocketConnection(ConnectedCount, e.AcceptSocket, this);
+                connection.OnConnectionClosed += ConnectionClosed;
                 ConnectionList.TryAdd(ConnectedCount, connection);
                 connection.Start();
+                OnConnectionCreated?.Invoke(this, new ConnectionInfo { Num = connection.Id, Description = string.Empty, Time = DateTime.Now });
             }
             catch (SocketException ex)
             {
@@ -150,6 +178,7 @@ namespace Incubator.SocketServer
                 connection.Close();
                 AcceptedClientsSemaphore.Release();
                 Interlocked.Decrement(ref ConnectedCount);
+                OnConnectionAborted?.Invoke(this, new ConnectionInfo { Num = connection.Id, Description = string.Empty, Time = DateTime.Now });
             }
             catch (Exception ex)
             {
@@ -169,12 +198,19 @@ namespace Incubator.SocketServer
                     return;
                 }
 
-                var messageData = SendingQueue.Take();
-                if (messageData != null)
+                var package = SendingQueue.Take();
+                if (package != null)
                 {
-                    OnSendMessage?.Invoke(this, messageData);
+                    OnMessageSending?.Invoke(this, package);
+                    Sending?.Invoke(this, package);
+                    OnMessageSent?.Invoke(this, package);
                 }
             }
+        }
+
+        private void ConnectionClosed(object sender, ConnectionInfo e)
+        {
+            OnConnectionClosed?.Invoke(sender, e);
         }
 
         private void Dispose()

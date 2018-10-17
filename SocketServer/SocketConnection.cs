@@ -12,17 +12,19 @@ namespace Incubator.SocketServer
 
     public class ConnectionAbortedException : OperationCanceledException
     {
-        public ConnectionAbortedException() :
-            this("The connection was aborted")
+        public ConnectionAbortedException() 
+            : this("The connection was aborted")
         {
 
         }
 
-        public ConnectionAbortedException(string message) : base(message)
+        public ConnectionAbortedException(string message) 
+            : base(message)
         {
         }
 
-        public ConnectionAbortedException(string message, Exception inner) : base(message, inner)
+        public ConnectionAbortedException(string message, Exception inner) 
+            : base(message, inner)
         {
         }
     }
@@ -41,10 +43,14 @@ namespace Incubator.SocketServer
         const int STARTED = 2;
         const int SHUTTING_DOWN = 3;
         const int SHUTDOWN = 4;
-        volatile int _execState;
+        volatile int _execStatus;
 
+        int _id;
         Socket _socket;
         SocketListener _socketListener;
+        SocketAsyncEventArgs readEventArgs;
+        SocketAsyncEventArgs sendEventArgs;
+        internal event EventHandler<ConnectionInfo> OnConnectionClosed;
         ParseEnum _parseStatus;
         byte[] headBuffer = null;
         byte[] bodyBuffer = null;
@@ -59,28 +65,28 @@ namespace Incubator.SocketServer
         int messageBytesDoneThisOp = 0;
         int remainingBytesToProcess = 0;
 
-        public SocketConnection(Socket socket, SocketListener listener)
+        internal int Id { get { return _id; } }
+
+        public SocketConnection(int id, Socket socket, SocketListener listener)
         {
-            _execState = NOT_STARTED;
+            _id = id;
+            _execStatus = NOT_STARTED;
             _socket = socket;
             _socketListener = listener;
-            _socketListener.OnSendMessage += SendMessage;
+            _socketListener.Sending += SendMessage;
             _parseStatus = ParseEnum.Received;
-            Interlocked.Increment(ref  _socketListener.ConnectedCount);
+            readEventArgs = _socketListener.SocketAsyncReceiveEventArgsPool.Pop();
+            readEventArgs.Completed += IO_Completed;
+            sendEventArgs = _socketListener.SocketAsyncSendEventArgsPool.Pop();
+            sendEventArgs.Completed += IO_Completed;
+            Interlocked.Increment(ref _socketListener.ConnectedCount);
         }
 
         public void Start()
         {
             Task.Factory.StartNew(() =>
             {
-                Interlocked.CompareExchange(ref _execState, STARTED, NOT_STARTED);
-                var readEventArgs = _socketListener.SocketAsyncReceiveEventArgsPool.Pop();
-                // 如果saea没有socket操作，意味着该对象没有绑定过事件handler
-                // todo: 此种判定方式比较优雅，但是正确性没有经过检验
-                if (readEventArgs.LastOperation == SocketAsyncOperation.None)
-                {
-                    readEventArgs.Completed += IO_Completed;
-                }
+                Interlocked.CompareExchange(ref _execStatus, STARTED, NOT_STARTED);
                 var willRaiseEvent = _socket.ReceiveAsync(readEventArgs);
                 if (!willRaiseEvent)
                 {
@@ -99,7 +105,7 @@ namespace Incubator.SocketServer
 
         public void Close()
         {
-            Interlocked.CompareExchange(ref _execState, SHUTTING_DOWN, STARTED);
+            Interlocked.CompareExchange(ref _execStatus, SHUTTING_DOWN, STARTED);
             // close the socket associated with the client
             try
             {
@@ -109,14 +115,15 @@ namespace Incubator.SocketServer
             catch
             {
             }
-
             _socket.Close();
-            Interlocked.CompareExchange(ref _execState, SHUTDOWN, SHUTTING_DOWN);
+            _socketListener.SocketAsyncSendEventArgsPool.Push(sendEventArgs);
+            _socketListener.SocketAsyncReceiveEventArgsPool.Push(readEventArgs);
+            Interlocked.CompareExchange(ref _execStatus, SHUTDOWN, SHUTTING_DOWN);
         }
 
         private void ProcessReceive(SocketAsyncEventArgs e)
         {
-            if (_execState >= SHUTTING_DOWN)
+            if (_execStatus >= SHUTTING_DOWN)
             {
                 return;
             }
@@ -133,7 +140,7 @@ namespace Incubator.SocketServer
                             // 接收到FIN
                             if (read == 0)
                             {
-                                InnerClose(e);
+                                DoClose();
                                 return;
                             }
 
@@ -142,7 +149,7 @@ namespace Incubator.SocketServer
                         }
                         else
                         {
-                            InnerClose(e);
+                            DoAbort();
                             throw new ConnectionAbortedException("e.SocketError != SocketError.Success");
                         }
                     }
@@ -172,7 +179,7 @@ namespace Incubator.SocketServer
                                 ArrayPool<byte>.Shared.Return(headBuffer, true);
                                 if (messageLength > maxMessageLength)
                                 {
-                                    InnerClose(e);
+                                    DoAbort();
                                     throw new ConnectionAbortedException("消息长度超过最大限制，直接丢弃");
                                 }
 
@@ -282,40 +289,41 @@ namespace Incubator.SocketServer
             }
         }
 
-        private void InnerClose(SocketAsyncEventArgs e)
+        private void DoClose()
         {
-            _socketListener.SocketAsyncReceiveEventArgsPool.Push(e);
+            Close();
+            OnConnectionClosed?.Invoke(this, new ConnectionInfo { Num = this.Id, Description = string.Empty, Time = DateTime.Now });
+        }
+
+        private void DoAbort()
+        {
+            _socketListener.SocketAsyncSendEventArgsPool.Push(sendEventArgs);
+            _socketListener.SocketAsyncReceiveEventArgsPool.Push(readEventArgs);
         }
 
         private void ProcessMessage(byte[] messageData)
         {
-            _socketListener.SendingQueue.Add(messageData);
+            var package = new Package { connection = this, MessageData = messageData };
+            _socketListener.SendingQueue.Add(package);
         }
 
-        private void SendMessage(object sender, byte[] messageData)
+        private static void SendMessage(object sender, Package package)
         {
-            Console.WriteLine(Encoding.UTF8.GetString(messageData));
-            ArrayPool<byte>.Shared.Return(messageData);
+            Console.WriteLine(Encoding.UTF8.GetString(package.MessageData));
+            ArrayPool<byte>.Shared.Return(package.MessageData);
 
-            var sendEventArgs = _socketListener.SocketAsyncSendEventArgsPool.Pop();
-            // 如果saea没有socket操作，意味着该对象没有绑定过事件handler
-            // todo: 此种判定方式比较优雅，但是正确性没有经过检验
-            if (sendEventArgs.LastOperation == SocketAsyncOperation.None)
-            {
-                sendEventArgs.Completed += IO_Completed;
-            }
-            
-            var willRaiseEvent = _socket.SendAsync(sendEventArgs);
+            var socket = package.connection._socket;
+            var sendArgs = package.connection.sendEventArgs;
+            var willRaiseEvent = socket.SendAsync(sendArgs);
             if (!willRaiseEvent)
             {
-                ProcessSend(sendEventArgs);
+                ProcessSend(sendArgs);
             }
         }
 
-        private void ProcessSend(SocketAsyncEventArgs e)
+        private static void ProcessSend(SocketAsyncEventArgs e)
         {
             Array.Clear(e.Buffer, 0, e.Buffer.Length);
-            _socketListener.SocketAsyncSendEventArgsPool.Push(e);
         }
 
         private void IO_Completed(object sender, SocketAsyncEventArgs e)
