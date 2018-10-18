@@ -52,7 +52,7 @@ namespace Incubator.SocketServer
 
         private void On_ConnectionCreated(object sender, ConnectionInfo e)
         {
-            Console.WriteLine("新连接建立成功，Info：" + e);
+            Console.WriteLine("新连接建立成功，详情：" + e);
         }
 
         private void On_ConnectionClosed(object sender, ConnectionInfo e)

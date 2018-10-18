@@ -27,6 +27,7 @@ namespace Incubator.SocketServer
 
     public class SocketListener
     {
+        private bool _debug;
         private Socket _socket;
         private int _bufferSize;
         private int _maxConnectionCount;
@@ -52,8 +53,9 @@ namespace Incubator.SocketServer
         #endregion
         internal ConcurrentDictionary<int, SocketConnection> ConnectionList;
 
-        public SocketListener(int maxConnectionCount, int bufferSize)
+        public SocketListener(int maxConnectionCount, int bufferSize, bool debug = false)
         {
+            _debug = debug;
             _bufferSize = bufferSize;
             _maxConnectionCount = 0;
             _maxConnectionCount = maxConnectionCount;
@@ -162,7 +164,7 @@ namespace Incubator.SocketServer
             try
             {
                 Interlocked.Increment(ref ConnectedCount);
-                connection = new SocketConnection(ConnectedCount, e.AcceptSocket, this);
+                connection = new SocketConnection(ConnectedCount, e.AcceptSocket, this, _debug);
                 connection.OnConnectionClosed += ConnectionClosed;
                 ConnectionList.TryAdd(ConnectedCount, connection);
                 connection.Start();
@@ -219,6 +221,14 @@ namespace Incubator.SocketServer
             AcceptedClientsSemaphore.Dispose();
             SocketAsyncSendEventArgsPool.Dispose();
             SocketAsyncReceiveEventArgsPool.Dispose();
+        }
+
+        private void Print(string message)
+        {
+            if (_debug)
+            {
+                Console.WriteLine(message);
+            }
         }
     }
 }
