@@ -165,6 +165,9 @@ namespace Incubator.TcpPackage
                                 ProcessMessage(bodyBuffer, messageLength, generator);
                                 if (remainingBytesToProcess == 0)
                                 {
+                                    messageLength = 0;
+                                    prefixBytesDoneCount = 0;
+                                    messageBytesDoneCount = 0;
                                     status = ParseEnum.Receive;
                                     goto Loop;
                                 }
