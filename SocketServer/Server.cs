@@ -57,12 +57,12 @@ namespace Incubator.SocketServer
 
         private void On_ConnectionClosed(object sender, ConnectionInfo e)
         {
-            Console.WriteLine("client主动关闭连接，Info：" + e);
+            Console.WriteLine("client主动关闭连接，详情：" + e);
         }
 
         private void On_ConnectionAborted(object sender, ConnectionInfo e)
         {
-            Console.WriteLine("连接被强制终止，Info：" + e);
+            Console.WriteLine("连接被强制终止，详情：" + e);
         }
 
         private void On_ServerStopping(object sender, EventArgs e)

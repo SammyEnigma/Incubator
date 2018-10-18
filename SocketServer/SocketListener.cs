@@ -21,7 +21,7 @@ namespace Incubator.SocketServer
 
         public override string ToString()
         {
-            return string.Format("Id：{0}，描述：{1}，时间：{2}", Num, Description, Time);
+            return string.Format("Id：{0}，描述：[{1}]，时间：{2}", Num, Description == string.Empty ? "空" : Description, Time);
         }
     }
 
@@ -61,7 +61,7 @@ namespace Incubator.SocketServer
             ConnectionList = new ConcurrentDictionary<int, SocketConnection>();
             SendingQueue = new BlockingCollection<Package>();
             SendMessageWorker = new Thread(PorcessMessageQueue);
-            _shutdownEvent = new ManualResetEventSlim(true);
+            _shutdownEvent = new ManualResetEventSlim(false);
             AcceptedClientsSemaphore = new SemaphoreSlim(maxConnectionCount, maxConnectionCount);
 
             SocketAsyncEventArgs socketAsyncEventArgs = null;
