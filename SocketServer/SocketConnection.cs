@@ -51,6 +51,7 @@ namespace Incubator.SocketServer
         SocketListener _socketListener;
         SocketAsyncEventArgs readEventArgs;
         SocketAsyncEventArgs sendEventArgs;
+        internal event EventHandler<byte[]> OnMessageReceived;
         internal event EventHandler<ConnectionInfo> OnConnectionClosed;
 
         ParseEnum _parseStatus;
@@ -135,6 +136,7 @@ namespace Incubator.SocketServer
 
             while (true)
             {
+                #region ParseLogic
                 switch (_parseStatus)
                 {
                     case ParseEnum.Received:
@@ -291,6 +293,7 @@ namespace Incubator.SocketServer
                         }
                         break;
                 }
+                #endregion
             }
         }
 
@@ -316,17 +319,18 @@ namespace Incubator.SocketServer
         }
 
         private void ProcessMessage(byte[] messageData)
-        {
-            var package = new Package { connection = this, MessageData = messageData };
-            _socketListener.SendingQueue.Add(package);
+        {            
+            OnMessageReceived?.Invoke(this, messageData);
         }
 
         private static void SendMessage(object sender, Package package)
         {
-            ArrayPool<byte>.Shared.Return(package.MessageData);
-
-            var socket = package.connection._socket;
-            var sendArgs = package.connection.sendEventArgs;
+            var connection = (SocketConnection)package.connection;
+            var socket = connection._socket;
+            var sendArgs = connection.sendEventArgs;
+            sendArgs.UserToken = package.MessageData; // 预先保存下来，使用完毕需要回收到ArrayPool中
+            // todo: 缓冲区一次发送不完的情况处理
+            Buffer.BlockCopy(package.MessageData, 0, sendArgs.Buffer, 0, package.MessageData.Length);
             var willRaiseEvent = socket.SendAsync(sendArgs);
             if (!willRaiseEvent)
             {
@@ -336,6 +340,7 @@ namespace Incubator.SocketServer
 
         private static void ProcessSend(SocketAsyncEventArgs e)
         {
+            ArrayPool<byte>.Shared.Return((byte[])e.UserToken);
         }
 
         private void IO_Completed(object sender, SocketAsyncEventArgs e)

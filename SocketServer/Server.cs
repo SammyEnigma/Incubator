@@ -26,6 +26,7 @@ namespace Incubator.SocketServer
             _listener.OnConnectionAborted += On_ConnectionAborted;
             _listener.OnServerStopping += On_ServerStopping;
             _listener.OnServerStopped += On_ServerStopped;
+            _listener.OnMessageReceived += On_MessageReceived;
             _listener.OnMessageSending += On_MessageSending;
             _listener.OnMessageSent += On_MessageSent;
         }
@@ -75,14 +76,19 @@ namespace Incubator.SocketServer
             Console.WriteLine("server已关闭");
         }
 
+        private void On_MessageReceived(object sender, byte[] e)
+        {
+            Console.WriteLine("收到客户端消息：" + System.Text.Encoding.UTF8.GetString(e));
+            var response = "go fuck yourself";
+            _listener.Send(new Package { connection = sender , MessageData = _listener.GetMessageBytes(response) });
+        }
+
         private void On_MessageSending(object sender, Package e)
         {
-            Console.WriteLine("准备发送消息：" + System.Text.Encoding.UTF8.GetString(e.MessageData));
         }
 
         private void On_MessageSent(object sender, Package e)
         {
-            Console.WriteLine("消息发送完毕：" + System.Text.Encoding.UTF8.GetString(e.MessageData));
         }
     }
 }

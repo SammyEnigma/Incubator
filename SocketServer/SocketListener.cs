@@ -3,13 +3,14 @@ using System.Buffers;
 using System.Collections.Concurrent;
 using System.Net;
 using System.Net.Sockets;
+using System.Text;
 using System.Threading;
 
 namespace Incubator.SocketServer
 {
     public class Package
     {
-        internal SocketConnection connection { set; get; }
+        internal object connection { set; get; }
         public byte[] MessageData { set; get; }
     }
 
@@ -47,6 +48,7 @@ namespace Incubator.SocketServer
         public event EventHandler<ConnectionInfo> OnConnectionAborted;
         public event EventHandler OnServerStopping;
         public event EventHandler OnServerStopped;
+        public event EventHandler<byte[]> OnMessageReceived;
         public event EventHandler<Package> OnMessageSending;
         internal event EventHandler<Package> Sending;
         public event EventHandler<Package> OnMessageSent;
@@ -121,6 +123,25 @@ namespace Incubator.SocketServer
             OnServerStopped?.Invoke(this, EventArgs.Empty);
         }
 
+        public void Send(Package package)
+        {
+            this.SendingQueue.Add(package);
+        }
+
+        public byte[] GetMessageBytes(string message)
+        {
+            var body = message;
+            var body_bytes = Encoding.UTF8.GetBytes(body);
+            var head = body_bytes.Length;
+            var head_bytes = BitConverter.GetBytes(head);
+            var bytes = ArrayPool<byte>.Shared.Rent(head_bytes.Length + body_bytes.Length);
+
+            Buffer.BlockCopy(head_bytes, 0, bytes, 0, head_bytes.Length);
+            Buffer.BlockCopy(body_bytes, 0, bytes, head_bytes.Length, body_bytes.Length);
+
+            return bytes;
+        }
+
         private void StartAccept(SocketAsyncEventArgs acceptEventArg = null)
         {
             if (_shutdownEvent.Wait(0)) // 仅检查标志，立即返回
@@ -165,7 +186,9 @@ namespace Incubator.SocketServer
             {
                 Interlocked.Increment(ref ConnectedCount);
                 connection = new SocketConnection(ConnectedCount, e.AcceptSocket, this, _debug);
+                connection.OnMessageReceived += MessageReceived;
                 connection.OnConnectionClosed += ConnectionClosed;
+
                 ConnectionList.TryAdd(ConnectedCount, connection);
                 connection.Start();
                 OnConnectionCreated?.Invoke(this, new ConnectionInfo { Num = connection.Id, Description = string.Empty, Time = DateTime.Now });
@@ -213,6 +236,11 @@ namespace Incubator.SocketServer
         private void ConnectionClosed(object sender, ConnectionInfo e)
         {
             OnConnectionClosed?.Invoke(sender, e);
+        }
+
+        private void MessageReceived(object sender, byte[] e)
+        {
+            OnMessageReceived?.Invoke(sender, e);
         }
 
         private void Dispose()
