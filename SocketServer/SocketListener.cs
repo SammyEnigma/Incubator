@@ -26,17 +26,33 @@ namespace Incubator.SocketServer
         }
     }
 
+    // 用来模拟友元（访问控制）
+    public interface IInnerCallBack
+    {
+        void MessageReceived(SocketConnection connection, byte[] messageData);
+        void ConnectionClosed(ConnectionInfo connectionInfo);
+    }
+
+    public interface IConnectionEvents
+    {
+        event EventHandler<ConnectionInfo> OnConnectionCreated;
+        event EventHandler<ConnectionInfo> OnConnectionClosed;
+        event EventHandler<ConnectionInfo> OnConnectionAborted;
+        event EventHandler<byte[]> OnMessageReceived;
+        event EventHandler<Package> OnMessageSending;
+        event EventHandler<Package> OnMessageSent;
+    }
+
+    // todo: 也许叫reactor，或者eventpump更有利于今后开展抽象
+    // 比如，客户端也叫listener就很不合适
     public abstract class BaseListener
     {
         protected bool Debug;
         protected int BufferSize;
-        protected int MaxConnectionCount;
-        protected volatile int ConnectedCount;
         protected Socket Socket;
         protected Thread SendMessageWorker;
         protected ManualResetEventSlim ShutdownEvent;
         protected BlockingCollection<Package> SendingQueue;
-        protected SemaphoreSlim AcceptedClientsSemaphore;
 
         internal IOCompletionPortTaskScheduler Scheduler;
         internal SocketAsyncEventArgsPool SocketAsyncReceiveEventArgsPool;
@@ -46,38 +62,25 @@ namespace Incubator.SocketServer
         public abstract void Stop();
         public abstract void Send(Package package);
         public abstract byte[] GetMessageBytes(string message);
-    }
 
-    public interface IInnerCallBack
-    {
-        void MessageReceived(SocketConnection connection, byte[] messageData);
-        void ConnectionClosed(ConnectionInfo connectionInfo);
-    }
-
-    public interface IConnectionEvents
-    {
-        event EventHandler OnServerStarting;
-        event EventHandler OnServerStarted;
-        event EventHandler<ConnectionInfo> OnConnectionCreated;
-        event EventHandler<ConnectionInfo> OnConnectionClosed;
-        event EventHandler<ConnectionInfo> OnConnectionAborted;
-        event EventHandler OnServerStopping;
-        event EventHandler OnServerStopped;
-        event EventHandler<byte[]> OnMessageReceived;
-        event EventHandler<Package> OnMessageSending;
-        event EventHandler<Package> OnMessageSent;
+        protected void Print(string message)
+        {
+            if (Debug)
+            {
+                Console.WriteLine(message);
+            }
+        }
     }
 
     public class SocketListener : BaseListener, IConnectionEvents, IInnerCallBack
     {
+        private int _maxConnectionCount;
+        private volatile int _connectedCount;
+        private SemaphoreSlim _acceptedClientsSemaphore;
         #region 事件
-        public event EventHandler OnServerStarting;
-        public event EventHandler OnServerStarted;
         public event EventHandler<ConnectionInfo> OnConnectionCreated;
         public event EventHandler<ConnectionInfo> OnConnectionClosed;
         public event EventHandler<ConnectionInfo> OnConnectionAborted;
-        public event EventHandler OnServerStopping;
-        public event EventHandler OnServerStopped;
         public event EventHandler<byte[]> OnMessageReceived;
         public event EventHandler<Package> OnMessageSending;
         public event EventHandler<Package> OnMessageSent;
@@ -88,14 +91,13 @@ namespace Incubator.SocketServer
         {
             Debug = debug;
             BufferSize = bufferSize;
-            MaxConnectionCount = 0;
-            MaxConnectionCount = maxConnectionCount;
+            _maxConnectionCount = maxConnectionCount;
+            _acceptedClientsSemaphore = new SemaphoreSlim(maxConnectionCount, maxConnectionCount);
             Scheduler = new IOCompletionPortTaskScheduler(12, 12);
             ConnectionList = new ConcurrentDictionary<int, SocketConnection>();
             SendingQueue = new BlockingCollection<Package>();
             SendMessageWorker = new Thread(PorcessMessageQueue);
             ShutdownEvent = new ManualResetEventSlim(false);
-            AcceptedClientsSemaphore = new SemaphoreSlim(maxConnectionCount, maxConnectionCount);
 
             SocketAsyncEventArgs socketAsyncEventArgs = null;
             SocketAsyncSendEventArgsPool = new SocketAsyncEventArgsPool(maxConnectionCount);
@@ -114,19 +116,16 @@ namespace Incubator.SocketServer
 
         public override void Start(IPEndPoint localEndPoint)
         {
-            OnServerStarting?.Invoke(this, EventArgs.Empty);
             Socket = new Socket(localEndPoint.AddressFamily, SocketType.Stream, ProtocolType.Tcp);
             Socket.Bind(localEndPoint);
             Socket.Listen(500);
             SendMessageWorker.Start();
-            OnServerStarted?.Invoke(this, EventArgs.Empty);
             StartAccept();
         }
 
         public override void Stop()
         {
             ShutdownEvent.Set();
-            OnServerStopping?.Invoke(this, EventArgs.Empty);
 
             // 处理队列中剩余的消息
             Package package;
@@ -149,7 +148,6 @@ namespace Incubator.SocketServer
             }
             Socket.Close();
             Dispose();
-            OnServerStopped?.Invoke(this, EventArgs.Empty);
         }
 
         private void StartAccept(SocketAsyncEventArgs acceptEventArg = null)
@@ -170,7 +168,7 @@ namespace Incubator.SocketServer
                 acceptEventArg.AcceptSocket = null;
             }
 
-            AcceptedClientsSemaphore.Wait();
+            _acceptedClientsSemaphore.Wait();
             var willRaiseEvent = Socket.AcceptAsync(acceptEventArg);
             if (!willRaiseEvent)
             {
@@ -194,10 +192,10 @@ namespace Incubator.SocketServer
             SocketConnection connection = null;
             try
             {
-                Interlocked.Increment(ref ConnectedCount);
-                connection = new SocketConnection(ConnectedCount, e.AcceptSocket, this, Debug);
-                ConnectionList.TryAdd(ConnectedCount, connection);
-                Interlocked.Increment(ref ConnectedCount);
+                Interlocked.Increment(ref _connectedCount);
+                connection = new SocketConnection(_connectedCount, e.AcceptSocket, this, Debug);
+                ConnectionList.TryAdd(_connectedCount, connection);
+                Interlocked.Increment(ref _connectedCount);
                 connection.Start();
                 OnConnectionCreated?.Invoke(this, new ConnectionInfo { Num = connection.Id, Description = string.Empty, Time = DateTime.Now });
             }
@@ -209,8 +207,8 @@ namespace Incubator.SocketServer
             {
                 Console.WriteLine(ex.Message);
                 connection.Close();
-                AcceptedClientsSemaphore.Release();
-                Interlocked.Decrement(ref ConnectedCount);
+                _acceptedClientsSemaphore.Release();
+                Interlocked.Decrement(ref _connectedCount);
                 OnConnectionAborted?.Invoke(this, new ConnectionInfo { Num = connection.Id, Description = string.Empty, Time = DateTime.Now });
             }
             catch (Exception ex)
@@ -254,13 +252,13 @@ namespace Incubator.SocketServer
                 if (package != null)
                 {
                     OnMessageSending?.Invoke(this, package);
-                    Sending(package);
+                    OnInnerSending(package);
                     OnMessageSent?.Invoke(this, package);
                 }
             }
         }
 
-        private void Sending(Package package)
+        private void OnInnerSending(Package package)
         {
             ((SocketConnection)package.Connection).InnerSend(package);
         }
@@ -278,17 +276,9 @@ namespace Incubator.SocketServer
         private void Dispose()
         {
             Scheduler.Dispose();
-            AcceptedClientsSemaphore.Dispose();
+            _acceptedClientsSemaphore.Dispose();
             SocketAsyncSendEventArgsPool.Dispose();
             SocketAsyncReceiveEventArgsPool.Dispose();
-        }
-
-        private void Print(string message)
-        {
-            if (Debug)
-            {
-                Console.WriteLine(message);
-            }
         }
     }
 }

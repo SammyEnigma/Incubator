@@ -19,13 +19,9 @@ namespace Incubator.SocketServer
 
         public void Init()
         {
-            (_listener as IConnectionEvents).OnServerStarting += On_ServerStarting;
-            (_listener as IConnectionEvents).OnServerStarted += On_ServerStarted;
             (_listener as IConnectionEvents).OnConnectionCreated += On_ConnectionCreated;
             (_listener as IConnectionEvents).OnConnectionClosed += On_ConnectionClosed;
             (_listener as IConnectionEvents).OnConnectionAborted += On_ConnectionAborted;
-            (_listener as IConnectionEvents).OnServerStopping += On_ServerStopping;
-            (_listener as IConnectionEvents).OnServerStopped += On_ServerStopped;
             (_listener as IConnectionEvents).OnMessageReceived += On_MessageReceived;
             (_listener as IConnectionEvents).OnMessageSending += On_MessageSending;
             (_listener as IConnectionEvents).OnMessageSent += On_MessageSent;
@@ -33,22 +29,36 @@ namespace Incubator.SocketServer
 
         public void Start()
         {
+            ServerStarting();
             _listener.Start(_endPoint);
+            ServerStarted();
         }
 
         public void Stop()
         {
+            ServerStopping();
             _listener.Stop();
+            ServerStopped();
         }
 
-        private void On_ServerStarting(object sender, EventArgs e)
+        private void ServerStarting()
         {
             Console.WriteLine("server开启中...");
         }
 
-        private void On_ServerStarted(object sender, EventArgs e)
+        private void ServerStarted()
         {
             Console.WriteLine("server启动成功");
+        }
+
+        private void ServerStopping()
+        {
+            Console.WriteLine("server关闭中...");
+        }
+
+        private void ServerStopped()
+        {
+            Console.WriteLine("server已关闭");
         }
 
         private void On_ConnectionCreated(object sender, ConnectionInfo e)
@@ -64,16 +74,6 @@ namespace Incubator.SocketServer
         private void On_ConnectionAborted(object sender, ConnectionInfo e)
         {
             Console.WriteLine("连接被强制终止：" + e);
-        }
-
-        private void On_ServerStopping(object sender, EventArgs e)
-        {
-            Console.WriteLine("server关闭中...");
-        }
-
-        private void On_ServerStopped(object sender, EventArgs e)
-        {
-            Console.WriteLine("server已关闭");
         }
 
         private void On_MessageReceived(object sender, byte[] e)
