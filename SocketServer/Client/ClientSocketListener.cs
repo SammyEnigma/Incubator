@@ -6,54 +6,23 @@ using System.Net.Sockets;
 using System.Text;
 using System.Threading;
 
-namespace Incubator.SocketServer
+namespace Incubator.SocketServer.Client
 {
-    public class Package
+    /*
+    public class ClientSocketListener : BaseListener
     {
-        internal object connection { set; get; }
-        public byte[] MessageData { set; get; }
-    }
-
-    public class ConnectionInfo
-    {
-        public int Num { set; get; }
-        public string Description { set; get; }
-        public DateTime Time { set; get; }
-
-        public override string ToString()
-        {
-            return string.Format("Id：{0}，描述：[{1}]，时间：{2}", Num, Description == string.Empty ? "空" : Description, Time);
-        }
-    }
-
-    public abstract class BaseListener
-    {
-        protected bool Debug;
-        protected int BufferSize;
-        protected int MaxConnectionCount;
-        protected Socket Socket;
-        protected ManualResetEventSlim ShutdownEvent;
-        protected BlockingCollection<Package> SendingQueue;
-        protected Thread SendMessageWorker;
-        protected SemaphoreSlim AcceptedClientsSemaphore;
-        protected volatile int ConnectedCount;
-
+        private bool _debug;
+        private Socket _socket;
+        private int _bufferSize;
+        private int _maxConnectionCount;
+        private ManualResetEventSlim _shutdownEvent;
+        internal volatile int ConnectedCount;
+        internal Thread SendMessageWorker;
+        internal SemaphoreSlim AcceptedClientsSemaphore;
+        internal BlockingCollection<Package> SendingQueue;
         internal IOCompletionPortTaskScheduler Scheduler;
         internal SocketAsyncEventArgsPool SocketAsyncReceiveEventArgsPool;
         internal SocketAsyncEventArgsPool SocketAsyncSendEventArgsPool;
-        
-        public abstract void Send(Package package);
-        public abstract byte[] GetMessageBytes(string message);
-    }
-
-    public interface IInnerCallBack
-    {
-        void MessageReceived(byte[] messageBytes);
-        void ConnectionClosed(ConnectionInfo info);
-    }
-
-    public class SocketListener : BaseListener, IInnerCallBack
-    {
         #region 事件
         public event EventHandler OnServerStarting;
         public event EventHandler OnServerStarted;
@@ -64,21 +33,22 @@ namespace Incubator.SocketServer
         public event EventHandler OnServerStopped;
         public event EventHandler<byte[]> OnMessageReceived;
         public event EventHandler<Package> OnMessageSending;
+        internal event EventHandler<Package> Sending;
         public event EventHandler<Package> OnMessageSent;
         #endregion
         internal ConcurrentDictionary<int, SocketConnection> ConnectionList;
 
-        public SocketListener(int maxConnectionCount, int bufferSize, bool debug = false)
+        public ClientSocketListener(int maxConnectionCount, int bufferSize, bool debug = false)
         {
-            Debug = debug;
-            BufferSize = bufferSize;
-            MaxConnectionCount = 0;
-            MaxConnectionCount = maxConnectionCount;
+            _debug = debug;
+            _bufferSize = bufferSize;
+            _maxConnectionCount = 0;
+            _maxConnectionCount = maxConnectionCount;
             Scheduler = new IOCompletionPortTaskScheduler(12, 12);
             ConnectionList = new ConcurrentDictionary<int, SocketConnection>();
             SendingQueue = new BlockingCollection<Package>();
             SendMessageWorker = new Thread(PorcessMessageQueue);
-            ShutdownEvent = new ManualResetEventSlim(false);
+            _shutdownEvent = new ManualResetEventSlim(false);
             AcceptedClientsSemaphore = new SemaphoreSlim(maxConnectionCount, maxConnectionCount);
 
             SocketAsyncEventArgs socketAsyncEventArgs = null;
@@ -99,9 +69,9 @@ namespace Incubator.SocketServer
         public void Start(IPEndPoint localEndPoint)
         {
             OnServerStarting?.Invoke(this, EventArgs.Empty);
-            Socket = new Socket(localEndPoint.AddressFamily, SocketType.Stream, ProtocolType.Tcp);
-            Socket.Bind(localEndPoint);
-            Socket.Listen(500);
+            _socket = new Socket(localEndPoint.AddressFamily, SocketType.Stream, ProtocolType.Tcp);
+            _socket.Bind(localEndPoint);
+            _socket.Listen(500);
             SendMessageWorker.Start();
             OnServerStarted?.Invoke(this, EventArgs.Empty);
             StartAccept();
@@ -109,7 +79,7 @@ namespace Incubator.SocketServer
 
         public void Stop()
         {
-            ShutdownEvent.Set();
+            _shutdownEvent.Set();
             OnServerStopping?.Invoke(this, EventArgs.Empty);
 
             // 处理队列中剩余的消息
@@ -131,14 +101,33 @@ namespace Incubator.SocketServer
                     conn.Dispose();
                 }
             }
-            Socket.Close();
+            _socket.Close();
             Dispose();
             OnServerStopped?.Invoke(this, EventArgs.Empty);
         }
 
+        public void Send(Package package)
+        {
+            this.SendingQueue.Add(package);
+        }
+
+        public byte[] GetMessageBytes(string message)
+        {
+            var body = message;
+            var body_bytes = Encoding.UTF8.GetBytes(body);
+            var head = body_bytes.Length;
+            var head_bytes = BitConverter.GetBytes(head);
+            var bytes = ArrayPool<byte>.Shared.Rent(head_bytes.Length + body_bytes.Length);
+
+            Buffer.BlockCopy(head_bytes, 0, bytes, 0, head_bytes.Length);
+            Buffer.BlockCopy(body_bytes, 0, bytes, head_bytes.Length, body_bytes.Length);
+
+            return bytes;
+        }
+
         private void StartAccept(SocketAsyncEventArgs acceptEventArg = null)
         {
-            if (ShutdownEvent.Wait(0)) // 仅检查标志，立即返回
+            if (_shutdownEvent.Wait(0)) // 仅检查标志，立即返回
             {
                 // 关闭事件触发，退出loop
                 return;
@@ -155,7 +144,7 @@ namespace Incubator.SocketServer
             }
 
             AcceptedClientsSemaphore.Wait();
-            var willRaiseEvent = Socket.AcceptAsync(acceptEventArg);
+            var willRaiseEvent = _socket.AcceptAsync(acceptEventArg);
             if (!willRaiseEvent)
             {
                 ProcessAccept(acceptEventArg);
@@ -169,7 +158,7 @@ namespace Incubator.SocketServer
 
         private void ProcessAccept(SocketAsyncEventArgs e)
         {
-            if (ShutdownEvent.Wait(0)) // 仅检查标志，立即返回
+            if (_shutdownEvent.Wait(0)) // 仅检查标志，立即返回
             {
                 // 关闭事件触发，退出loop
                 return;
@@ -179,9 +168,10 @@ namespace Incubator.SocketServer
             try
             {
                 Interlocked.Increment(ref ConnectedCount);
-                connection = new SocketConnection(ConnectedCount, e.AcceptSocket, this, Debug);
+                connection = new SocketConnection(ConnectedCount, e.AcceptSocket, this, _debug);
+                connection.OnMessageReceived += MessageReceived;
+                connection.OnConnectionClosed += ConnectionClosed;
                 ConnectionList.TryAdd(ConnectedCount, connection);
-                Interlocked.Increment(ref ConnectedCount);
 
                 connection.Start();
 
@@ -207,30 +197,11 @@ namespace Incubator.SocketServer
             StartAccept(e);
         }
 
-        public override void Send(Package package)
-        {
-            this.SendingQueue.Add(package);
-        }
-
-        public override byte[] GetMessageBytes(string message)
-        {
-            var body = message;
-            var body_bytes = Encoding.UTF8.GetBytes(body);
-            var head = body_bytes.Length;
-            var head_bytes = BitConverter.GetBytes(head);
-            var bytes = ArrayPool<byte>.Shared.Rent(head_bytes.Length + body_bytes.Length);
-
-            Buffer.BlockCopy(head_bytes, 0, bytes, 0, head_bytes.Length);
-            Buffer.BlockCopy(body_bytes, 0, bytes, head_bytes.Length, body_bytes.Length);
-
-            return bytes;
-        }
-
         private void PorcessMessageQueue()
         {
             while (true)
             {
-                if (ShutdownEvent.Wait(0)) // 仅检查标志，立即返回
+                if (_shutdownEvent.Wait(0)) // 仅检查标志，立即返回
                 {
                     // 关闭事件触发，退出loop
                     return;
@@ -240,26 +211,20 @@ namespace Incubator.SocketServer
                 if (package != null)
                 {
                     OnMessageSending?.Invoke(this, package);
-                    Sending(package);
+                    Sending?.Invoke(this, package);
                     OnMessageSent?.Invoke(this, package);
                 }
             }
         }
 
-        private void Sending(Package package)
+        private void ConnectionClosed(object sender, ConnectionInfo e)
         {
-            var connection = (SocketConnection)package.connection;
-            connection.InnerSend(package);
+            OnConnectionClosed?.Invoke(sender, e);
         }
 
-        public void ConnectionClosed(ConnectionInfo connectionInfo)
+        private void MessageReceived(object sender, byte[] e)
         {
-            OnConnectionClosed?.Invoke(this, connectionInfo);
-        }
-
-        public void MessageReceived(byte[] messageData)
-        {
-            OnMessageReceived?.Invoke(this, messageData);
+            OnMessageReceived?.Invoke(sender, e);
         }
 
         private void Dispose()
@@ -272,10 +237,11 @@ namespace Incubator.SocketServer
 
         private void Print(string message)
         {
-            if (Debug)
+            if (_debug)
             {
                 Console.WriteLine(message);
             }
         }
     }
+    */
 }

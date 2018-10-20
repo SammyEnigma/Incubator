@@ -5,10 +5,10 @@ namespace Incubator.SocketServer
 {
     public class Server
     {
+        IPEndPoint _endPoint;
         SocketListener _listener;
         int _bufferSize = 256;
         int _maxConnectionCount = 500;
-        IPEndPoint _endPoint;
 
         public Server(string address, int port)
         {
@@ -53,17 +53,17 @@ namespace Incubator.SocketServer
 
         private void On_ConnectionCreated(object sender, ConnectionInfo e)
         {
-            Console.WriteLine("新连接建立成功，详情：" + e);
+            Console.WriteLine("新连接建立成功：" + e);
         }
 
         private void On_ConnectionClosed(object sender, ConnectionInfo e)
         {
-            Console.WriteLine("client主动关闭连接，详情：" + e);
+            Console.WriteLine("client主动关闭连接：" + e);
         }
 
         private void On_ConnectionAborted(object sender, ConnectionInfo e)
         {
-            Console.WriteLine("连接被强制终止，详情：" + e);
+            Console.WriteLine("连接被强制终止：" + e);
         }
 
         private void On_ServerStopping(object sender, EventArgs e)

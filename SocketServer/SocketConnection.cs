@@ -1,7 +1,6 @@
 ﻿using System;
 using System.Buffers;
 using System.Net.Sockets;
-using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -15,7 +14,6 @@ namespace Incubator.SocketServer
         public ConnectionAbortedException() 
             : this("The connection was aborted")
         {
-
         }
 
         public ConnectionAbortedException(string message) 
@@ -48,11 +46,9 @@ namespace Incubator.SocketServer
         int _id;
         bool _debug;
         Socket _socket;
-        SocketListener _socketListener;
-        SocketAsyncEventArgs readEventArgs;
-        SocketAsyncEventArgs sendEventArgs;
-        internal event EventHandler<byte[]> OnMessageReceived;
-        internal event EventHandler<ConnectionInfo> OnConnectionClosed;
+        BaseListener _socketListener;
+        SocketAsyncEventArgs _readEventArgs;
+        SocketAsyncEventArgs _sendEventArgs;
 
         ParseEnum _parseStatus;
         byte[] headBuffer = null;
@@ -70,20 +66,18 @@ namespace Incubator.SocketServer
 
         internal int Id { get { return _id; } }
 
-        public SocketConnection(int id, Socket socket, SocketListener listener, bool debug)
+        public SocketConnection(int id, Socket socket, BaseListener listener, bool debug)
         {
             _id = id;
             _debug = debug;
             _execStatus = NOT_STARTED;
-            _socket = socket;
             _socketListener = listener;
-            _socketListener.Sending += SendMessage;
             _parseStatus = ParseEnum.Received;
-            readEventArgs = _socketListener.SocketAsyncReceiveEventArgsPool.Pop();
-            readEventArgs.Completed += IO_Completed;
-            sendEventArgs = _socketListener.SocketAsyncSendEventArgsPool.Pop();
-            sendEventArgs.Completed += IO_Completed;
-            Interlocked.Increment(ref _socketListener.ConnectedCount);
+            _socket = socket;
+            _readEventArgs = _socketListener.SocketAsyncReceiveEventArgsPool.Pop();
+            _readEventArgs.Completed += IO_Completed;
+            _sendEventArgs = _socketListener.SocketAsyncSendEventArgsPool.Pop();
+            _sendEventArgs.Completed += IO_Completed;
         }
 
         public void Start()
@@ -92,20 +86,15 @@ namespace Incubator.SocketServer
             {
                 Print("当前线程id：" + Thread.CurrentThread.ManagedThreadId);
                 Interlocked.CompareExchange(ref _execStatus, STARTED, NOT_STARTED);
-                var willRaiseEvent = _socket.ReceiveAsync(readEventArgs);
+                var willRaiseEvent = _socket.ReceiveAsync(_readEventArgs);
                 if (!willRaiseEvent)
                 {
-                    ProcessReceive(readEventArgs);
+                    ProcessReceive(_readEventArgs);
                 }
             },
             CancellationToken.None,
             TaskCreationOptions.None,
             _socketListener.Scheduler);
-        }
-
-        public void Dispose()
-        {
-            Close();
         }
 
         public void Close()
@@ -121,9 +110,14 @@ namespace Incubator.SocketServer
             {
             }
             _socket.Close();
-            _socketListener.SocketAsyncSendEventArgsPool.Push(sendEventArgs);
-            _socketListener.SocketAsyncReceiveEventArgsPool.Push(readEventArgs);
+            _socketListener.SocketAsyncSendEventArgsPool.Push(_sendEventArgs);
+            _socketListener.SocketAsyncReceiveEventArgsPool.Push(_readEventArgs);
             Interlocked.CompareExchange(ref _execStatus, SHUTDOWN, SHUTTING_DOWN);
+        }
+
+        public void Dispose()
+        {
+            Close();
         }
 
         private void ProcessReceive(SocketAsyncEventArgs e)
@@ -159,8 +153,7 @@ namespace Incubator.SocketServer
                             }
                             else
                             {
-                                DoAbort();
-                                throw new ConnectionAbortedException("e.SocketError != SocketError.Success");
+                                DoAbort("e.SocketError != SocketError.Success");
                             }
                         }
                         break;
@@ -189,8 +182,7 @@ namespace Incubator.SocketServer
                                     ArrayPool<byte>.Shared.Return(headBuffer, true);
                                     if (messageLength > maxMessageLength)
                                     {
-                                        DoAbort();
-                                        throw new ConnectionAbortedException("消息长度超过最大限制，直接丢弃");
+                                        DoAbort("消息长度超过最大限制，直接丢弃");
                                     }
 
                                     _parseStatus = ParseEnum.Process_Body;
@@ -268,7 +260,7 @@ namespace Incubator.SocketServer
                         break;
                     case ParseEnum.Find_Body:
                         {
-                            ProcessMessage(bodyBuffer);
+                            MessageReceived(bodyBuffer);
                             if (remainingBytesToProcess == 0)
                             {
                                 messageLength = 0;
@@ -309,36 +301,33 @@ namespace Incubator.SocketServer
         private void DoClose()
         {
             Close();
-            OnConnectionClosed?.Invoke(this, new ConnectionInfo { Num = this.Id, Description = string.Empty, Time = DateTime.Now });
+            (_socketListener as IInnerCallBack).ConnectionClosed(new ConnectionInfo { Num = this.Id, Description = string.Empty, Time = DateTime.Now });
         }
 
-        private void DoAbort()
+        private void DoAbort(string reason)
         {
-            _socketListener.SocketAsyncSendEventArgsPool.Push(sendEventArgs);
-            _socketListener.SocketAsyncReceiveEventArgsPool.Push(readEventArgs);
+            _socketListener.SocketAsyncSendEventArgsPool.Push(_sendEventArgs);
+            _socketListener.SocketAsyncReceiveEventArgsPool.Push(_readEventArgs);
+            throw new ConnectionAbortedException(reason);
         }
 
-        private void ProcessMessage(byte[] messageData)
-        {            
-            OnMessageReceived?.Invoke(this, messageData);
-        }
-
-        private static void SendMessage(object sender, Package package)
+        private void MessageReceived(byte[] messageData)
         {
-            var connection = (SocketConnection)package.connection;
-            var socket = connection._socket;
-            var sendArgs = connection.sendEventArgs;
-            sendArgs.UserToken = package.MessageData; // 预先保存下来，使用完毕需要回收到ArrayPool中
+            (_socketListener as IInnerCallBack).MessageReceived(messageData);
+        }
+
+        internal void InnerSend(Package package)
+        {
             // todo: 缓冲区一次发送不完的情况处理
-            Buffer.BlockCopy(package.MessageData, 0, sendArgs.Buffer, 0, package.MessageData.Length);
-            var willRaiseEvent = socket.SendAsync(sendArgs);
+            Buffer.BlockCopy(package.MessageData, 0,  _sendEventArgs.Buffer, 0, package.MessageData.Length);
+            var willRaiseEvent = _socket.SendAsync(_sendEventArgs);
             if (!willRaiseEvent)
             {
-                ProcessSend(sendArgs);
+                ProcessSend(_sendEventArgs);
             }
         }
 
-        private static void ProcessSend(SocketAsyncEventArgs e)
+        private void ProcessSend(SocketAsyncEventArgs e)
         {
             ArrayPool<byte>.Shared.Return((byte[])e.UserToken);
         }
