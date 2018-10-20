@@ -6,7 +6,7 @@ namespace Incubator.SocketServer
     public class Server
     {
         IPEndPoint _endPoint;
-        SocketListener _listener;
+        BaseListener _listener;
         int _bufferSize = 256;
         int _maxConnectionCount = 500;
 
@@ -19,16 +19,16 @@ namespace Incubator.SocketServer
 
         public void Init()
         {
-            _listener.OnServerStarting += On_ServerStarting;
-            _listener.OnServerStarted += On_ServerStarted;
-            _listener.OnConnectionCreated += On_ConnectionCreated;
-            _listener.OnConnectionClosed += On_ConnectionClosed;
-            _listener.OnConnectionAborted += On_ConnectionAborted;
-            _listener.OnServerStopping += On_ServerStopping;
-            _listener.OnServerStopped += On_ServerStopped;
-            _listener.OnMessageReceived += On_MessageReceived;
-            _listener.OnMessageSending += On_MessageSending;
-            _listener.OnMessageSent += On_MessageSent;
+            (_listener as IConnectionEvents).OnServerStarting += On_ServerStarting;
+            (_listener as IConnectionEvents).OnServerStarted += On_ServerStarted;
+            (_listener as IConnectionEvents).OnConnectionCreated += On_ConnectionCreated;
+            (_listener as IConnectionEvents).OnConnectionClosed += On_ConnectionClosed;
+            (_listener as IConnectionEvents).OnConnectionAborted += On_ConnectionAborted;
+            (_listener as IConnectionEvents).OnServerStopping += On_ServerStopping;
+            (_listener as IConnectionEvents).OnServerStopped += On_ServerStopped;
+            (_listener as IConnectionEvents).OnMessageReceived += On_MessageReceived;
+            (_listener as IConnectionEvents).OnMessageSending += On_MessageSending;
+            (_listener as IConnectionEvents).OnMessageSent += On_MessageSent;
         }
 
         public void Start()
@@ -53,7 +53,7 @@ namespace Incubator.SocketServer
 
         private void On_ConnectionCreated(object sender, ConnectionInfo e)
         {
-            Console.WriteLine("新连接建立成功：" + e);
+            Console.WriteLine("新建立连接：" + e);
         }
 
         private void On_ConnectionClosed(object sender, ConnectionInfo e)
@@ -80,7 +80,7 @@ namespace Incubator.SocketServer
         {
             Console.WriteLine("收到客户端消息：" + System.Text.Encoding.UTF8.GetString(e));
             var response = "go fuck yourself";
-            _listener.Send(new Package { connection = sender , MessageData = _listener.GetMessageBytes(response) });
+            _listener.Send(new Package { Connection = sender, MessageData = _listener.GetMessageBytes(response) });
         }
 
         private void On_MessageSending(object sender, Package e)

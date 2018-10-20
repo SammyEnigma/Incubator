@@ -27,7 +27,7 @@ namespace Incubator.SocketServer
         }
     }
 
-    internal class SocketConnection : IConnection
+    public class SocketConnection : IConnection
     {
         private enum ParseEnum
         {
@@ -313,11 +313,12 @@ namespace Incubator.SocketServer
 
         private void MessageReceived(byte[] messageData)
         {
-            (_socketListener as IInnerCallBack).MessageReceived(messageData);
+            (_socketListener as IInnerCallBack).MessageReceived(this, messageData);
         }
 
         internal void InnerSend(Package package)
         {
+            _sendEventArgs.UserToken = package.MessageData; // 预先保存下来，使用完毕需要回收到ArrayPool中
             // todo: 缓冲区一次发送不完的情况处理
             Buffer.BlockCopy(package.MessageData, 0,  _sendEventArgs.Buffer, 0, package.MessageData.Length);
             var willRaiseEvent = _socket.SendAsync(_sendEventArgs);

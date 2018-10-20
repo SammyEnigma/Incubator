@@ -10,7 +10,7 @@ namespace Incubator.SocketServer
 {
     public class Package
     {
-        internal object connection { set; get; }
+        public object Connection { set; get; }
         public byte[] MessageData { set; get; }
     }
 
@@ -31,28 +31,44 @@ namespace Incubator.SocketServer
         protected bool Debug;
         protected int BufferSize;
         protected int MaxConnectionCount;
+        protected volatile int ConnectedCount;
         protected Socket Socket;
+        protected Thread SendMessageWorker;
         protected ManualResetEventSlim ShutdownEvent;
         protected BlockingCollection<Package> SendingQueue;
-        protected Thread SendMessageWorker;
         protected SemaphoreSlim AcceptedClientsSemaphore;
-        protected volatile int ConnectedCount;
 
         internal IOCompletionPortTaskScheduler Scheduler;
         internal SocketAsyncEventArgsPool SocketAsyncReceiveEventArgsPool;
         internal SocketAsyncEventArgsPool SocketAsyncSendEventArgsPool;
-        
+
+        public abstract void Start(IPEndPoint localEndPoint);
+        public abstract void Stop();
         public abstract void Send(Package package);
         public abstract byte[] GetMessageBytes(string message);
     }
 
     public interface IInnerCallBack
     {
-        void MessageReceived(byte[] messageBytes);
-        void ConnectionClosed(ConnectionInfo info);
+        void MessageReceived(SocketConnection connection, byte[] messageData);
+        void ConnectionClosed(ConnectionInfo connectionInfo);
     }
 
-    public class SocketListener : BaseListener, IInnerCallBack
+    public interface IConnectionEvents
+    {
+        event EventHandler OnServerStarting;
+        event EventHandler OnServerStarted;
+        event EventHandler<ConnectionInfo> OnConnectionCreated;
+        event EventHandler<ConnectionInfo> OnConnectionClosed;
+        event EventHandler<ConnectionInfo> OnConnectionAborted;
+        event EventHandler OnServerStopping;
+        event EventHandler OnServerStopped;
+        event EventHandler<byte[]> OnMessageReceived;
+        event EventHandler<Package> OnMessageSending;
+        event EventHandler<Package> OnMessageSent;
+    }
+
+    public class SocketListener : BaseListener, IConnectionEvents, IInnerCallBack
     {
         #region 事件
         public event EventHandler OnServerStarting;
@@ -96,7 +112,7 @@ namespace Incubator.SocketServer
             }
         }
 
-        public void Start(IPEndPoint localEndPoint)
+        public override void Start(IPEndPoint localEndPoint)
         {
             OnServerStarting?.Invoke(this, EventArgs.Empty);
             Socket = new Socket(localEndPoint.AddressFamily, SocketType.Stream, ProtocolType.Tcp);
@@ -107,7 +123,7 @@ namespace Incubator.SocketServer
             StartAccept();
         }
 
-        public void Stop()
+        public override void Stop()
         {
             ShutdownEvent.Set();
             OnServerStopping?.Invoke(this, EventArgs.Empty);
@@ -182,9 +198,7 @@ namespace Incubator.SocketServer
                 connection = new SocketConnection(ConnectedCount, e.AcceptSocket, this, Debug);
                 ConnectionList.TryAdd(ConnectedCount, connection);
                 Interlocked.Increment(ref ConnectedCount);
-
                 connection.Start();
-
                 OnConnectionCreated?.Invoke(this, new ConnectionInfo { Num = connection.Id, Description = string.Empty, Time = DateTime.Now });
             }
             catch (SocketException ex)
@@ -248,8 +262,7 @@ namespace Incubator.SocketServer
 
         private void Sending(Package package)
         {
-            var connection = (SocketConnection)package.connection;
-            connection.InnerSend(package);
+            ((SocketConnection)package.Connection).InnerSend(package);
         }
 
         public void ConnectionClosed(ConnectionInfo connectionInfo)
@@ -257,9 +270,9 @@ namespace Incubator.SocketServer
             OnConnectionClosed?.Invoke(this, connectionInfo);
         }
 
-        public void MessageReceived(byte[] messageData)
+        public void MessageReceived(SocketConnection connection, byte[] messageData)
         {
-            OnMessageReceived?.Invoke(this, messageData);
+            OnMessageReceived?.Invoke(connection, messageData);
         }
 
         private void Dispose()
