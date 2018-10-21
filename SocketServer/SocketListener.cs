@@ -55,8 +55,8 @@ namespace Incubator.SocketServer
         protected BlockingCollection<Package> SendingQueue;
 
         internal IOCompletionPortTaskScheduler Scheduler;
-        internal SocketAsyncEventArgsPool SocketAsyncReceiveEventArgsPool;
-        internal SocketAsyncEventArgsPool SocketAsyncSendEventArgsPool;
+        internal ObjectPool<SocketAsyncEventArgs> SocketAsyncReceiveEventArgsPool;
+        internal ObjectPool<SocketAsyncEventArgs> SocketAsyncSendEventArgsPool;
 
         public abstract void Start(IPEndPoint localEndPoint);
         public abstract void Stop();
@@ -100,8 +100,8 @@ namespace Incubator.SocketServer
             ShutdownEvent = new ManualResetEventSlim(false);
 
             SocketAsyncEventArgs socketAsyncEventArgs = null;
-            SocketAsyncSendEventArgsPool = new SocketAsyncEventArgsPool(maxConnectionCount);
-            SocketAsyncReceiveEventArgsPool = new SocketAsyncEventArgsPool(maxConnectionCount);
+            SocketAsyncSendEventArgsPool = new ObjectPool<SocketAsyncEventArgs>(maxConnectionCount, null);
+            SocketAsyncReceiveEventArgsPool = new ObjectPool<SocketAsyncEventArgs>(maxConnectionCount, null);
             for (int i = 0; i < maxConnectionCount; i++)
             {
                 socketAsyncEventArgs = new SocketAsyncEventArgs();

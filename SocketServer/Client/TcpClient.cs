@@ -1,15 +1,17 @@
 ﻿using System;
 using System.Buffers;
 using System.Net;
+using System.Net.Sockets;
 using System.Text;
 using System.Threading;
 
 namespace Incubator.SocketServer.Client
 {
-    public class TcpClient : IConnectionEvents
+    public class TcpClient : ClientBase, IConnectionEvents
     {
-        SocketConnection connection;
+        Socket _client;
         ManualResetEventSlim _shutdownEvent;
+        int _connectTimeout; // 单位毫秒
         #region 事件
         public event EventHandler<ConnectionInfo> OnConnectionCreated;
         public event EventHandler<ConnectionInfo> OnConnectionClosed;
@@ -20,50 +22,10 @@ namespace Incubator.SocketServer.Client
         #endregion
 
         public TcpClient(string address, int port, int bufferSize, bool debug = false)
-        {
-            
-        }
-
-        public void Connect(IPEndPoint localEndPoint)
-        {
-
-        }
-
-        public void Stop()
-        {
-            _shutdownEvent.Set();
-            Dispose();
-        }
-
-        public void Send(Package package)
-        {
-
-        }
-
-        public byte[] GetMessageBytes(string message)
-        {
-            var body = message;
-            var body_bytes = Encoding.UTF8.GetBytes(body);
-            var head = body_bytes.Length;
-            var head_bytes = BitConverter.GetBytes(head);
-            var bytes = ArrayPool<byte>.Shared.Rent(head_bytes.Length + body_bytes.Length);
-
-            Buffer.BlockCopy(head_bytes, 0, bytes, 0, head_bytes.Length);
-            Buffer.BlockCopy(body_bytes, 0, bytes, head_bytes.Length, body_bytes.Length);
-
-            return bytes;
-        }
-
-        private void ConnectionClosed(object sender, ConnectionInfo e)
+            : base(address, port, bufferSize, debug)
         {
         }
 
-        private void MessageReceived(object sender, byte[] e)
-        {
-        }
 
-        private void Dispose()
-        {
-        }
     }
 }
