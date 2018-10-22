@@ -7,7 +7,7 @@ using System.Threading;
 
 namespace Incubator.SocketServer.Client
 {
-    public class ClientBase
+    public class ClientBase : IDisposable
     {
         private enum ParseEnum
         {
@@ -17,9 +17,9 @@ namespace Incubator.SocketServer.Client
             Find_Body = 4
         }
 
-        int _connectTimeout; // 单位毫秒
-        int _bufferSize;
         bool _debug;
+        int _bufferSize;
+        int _connectTimeout; // 单位毫秒
         Socket _client;
         IPEndPoint _remoteEndPoint;
         ManualResetEventSlim _closeEvent;
@@ -99,6 +99,10 @@ namespace Incubator.SocketServer.Client
             {
             }
             _client.Close();
+        }
+
+        public virtual void Dispose()
+        {
         }
 
         private void ProcessReceive(SocketAsyncEventArgs e)
@@ -283,6 +287,11 @@ namespace Incubator.SocketServer.Client
             throw new ConnectionAbortedException(reason);
         }
 
+        private void MessageReceived(byte[] messageData)
+        {
+
+        }
+
         public virtual void Send(byte[] messageData)
         {
             var willRaiseEvent = _client.SendAsync(_sendEventArgs);
@@ -295,6 +304,20 @@ namespace Incubator.SocketServer.Client
         private void ProcessSend(SocketAsyncEventArgs e)
         {
             ArrayPool<byte>.Shared.Return((byte[])e.UserToken);
+        }
+
+        public virtual byte[] GetMessageBytes(string message)
+        {
+            var body = message;
+            var body_bytes = Encoding.UTF8.GetBytes(body);
+            var head = body_bytes.Length;
+            var head_bytes = BitConverter.GetBytes(head);
+            var bytes = ArrayPool<byte>.Shared.Rent(head_bytes.Length + body_bytes.Length);
+
+            Buffer.BlockCopy(head_bytes, 0, bytes, 0, head_bytes.Length);
+            Buffer.BlockCopy(body_bytes, 0, bytes, head_bytes.Length, body_bytes.Length);
+
+            return bytes;
         }
 
         private void IO_Completed(object sender, SocketAsyncEventArgs e)
@@ -312,33 +335,6 @@ namespace Incubator.SocketServer.Client
             }
         }
 
-        public virtual byte[] GetMessageBytes(string message)
-        {
-            var body = message;
-            var body_bytes = Encoding.UTF8.GetBytes(body);
-            var head = body_bytes.Length;
-            var head_bytes = BitConverter.GetBytes(head);
-            var bytes = ArrayPool<byte>.Shared.Rent(head_bytes.Length + body_bytes.Length);
-
-            Buffer.BlockCopy(head_bytes, 0, bytes, 0, head_bytes.Length);
-            Buffer.BlockCopy(body_bytes, 0, bytes, head_bytes.Length, body_bytes.Length);
-
-            return bytes;
-        }
-
-        private void ConnectionClosed(object sender, ConnectionInfo e)
-        {
-        }
-
-        private void MessageReceived(byte[] messageData)
-        {
-
-        }
-
-        public virtual void Dispose()
-        {
-        }
-
         protected void Print(string message)
         {
             if (_debug)
@@ -348,3 +344,4 @@ namespace Incubator.SocketServer.Client
         }
     }
 }
+

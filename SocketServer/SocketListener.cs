@@ -99,19 +99,18 @@ namespace Incubator.SocketServer
             SendMessageWorker = new Thread(PorcessMessageQueue);
             ShutdownEvent = new ManualResetEventSlim(false);
 
-            SocketAsyncEventArgs socketAsyncEventArgs = null;
-            SocketAsyncSendEventArgsPool = new ObjectPool<SocketAsyncEventArgs>(maxConnectionCount, null);
-            SocketAsyncReceiveEventArgsPool = new ObjectPool<SocketAsyncEventArgs>(maxConnectionCount, null);
-            for (int i = 0; i < maxConnectionCount; i++)
+            SocketAsyncSendEventArgsPool = new ObjectPool<SocketAsyncEventArgs>(maxConnectionCount, () =>
             {
-                socketAsyncEventArgs = new SocketAsyncEventArgs();
+                var socketAsyncEventArgs = new SocketAsyncEventArgs();
                 socketAsyncEventArgs.SetBuffer(ArrayPool<byte>.Shared.Rent(bufferSize), 0, bufferSize);
-                SocketAsyncReceiveEventArgsPool.Push(socketAsyncEventArgs);
-
-                socketAsyncEventArgs = new SocketAsyncEventArgs();
+                return socketAsyncEventArgs;
+            });
+            SocketAsyncReceiveEventArgsPool = new ObjectPool<SocketAsyncEventArgs>(maxConnectionCount, () =>
+            {
+                var socketAsyncEventArgs = new SocketAsyncEventArgs();
                 socketAsyncEventArgs.SetBuffer(ArrayPool<byte>.Shared.Rent(bufferSize), 0, bufferSize);
-                SocketAsyncSendEventArgsPool.Push(socketAsyncEventArgs);
-            }
+                return socketAsyncEventArgs;
+            });
         }
 
         public override void Start(IPEndPoint localEndPoint)
