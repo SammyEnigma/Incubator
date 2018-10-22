@@ -328,6 +328,8 @@ namespace Incubator.SocketServer
             _sendEventArgs.UserToken = package.MessageData; // 预先保存下来，使用完毕需要回收到ArrayPool中
             // todo: 缓冲区一次发送不完的情况处理
             Buffer.BlockCopy(package.MessageData, 0,  _sendEventArgs.Buffer, 0, package.MessageData.Length);
+            // todo: abort和这里的send会有一个race condition，目前考虑的解决办法是abort那里自旋一段时间等
+            // 当次发送完毕了再予以关闭
             var willRaiseEvent = _socket.SendAsync(_sendEventArgs);
             if (!willRaiseEvent)
             {
