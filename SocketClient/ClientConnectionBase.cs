@@ -1,13 +1,15 @@
-﻿using System;
+﻿using Incubator.SocketServer;
+using System;
 using System.Buffers;
 using System.Net;
 using System.Net.Sockets;
 using System.Text;
 using System.Threading;
+using System.Threading.Tasks;
 
-namespace Incubator.SocketServer.Client
+namespace Incubator.SocketClient
 {
-    public class ClientBase : IDisposable
+    public class ClientConnectionBase : IDisposable, IPooledWapper
     {
         private enum ParseEnum
         {
@@ -40,7 +42,11 @@ namespace Incubator.SocketServer.Client
         int messageBytesDoneThisOp = 0;
         int remainingBytesToProcess = 0;
 
-        public ClientBase(string address, int port, int bufferSize, bool debug = false)
+        public DateTime LastGetTime { set; get; }
+
+        public bool IsDisposed => this._disposed;
+
+        public ClientConnectionBase(string address, int port, int bufferSize, bool debug = false)
         {
             _debug = debug;
             _disposed = false;
@@ -54,7 +60,7 @@ namespace Incubator.SocketServer.Client
             _remoteEndPoint = new IPEndPoint(IPAddress.Parse(address), port);
         }
 
-        ~ClientBase()
+        ~ClientConnectionBase()
         {
             //必须为false
             Dispose(false);
@@ -94,6 +100,14 @@ namespace Incubator.SocketServer.Client
             }
 
             // 至此，已经成功连接到远程服务端
+            Task.Run(() => 
+            {
+                var willRaiseEvent = _client.ReceiveAsync(_readEventArgs);
+                if (!willRaiseEvent)
+                {
+                    ProcessReceive(_readEventArgs);
+                }
+            });
         }
 
         public virtual void Close()
@@ -112,6 +126,7 @@ namespace Incubator.SocketServer.Client
 
         private void ProcessReceive(SocketAsyncEventArgs e)
         {
+            Console.WriteLine(123);
             while (true)
             {
                 #region ParseLogic
@@ -299,6 +314,8 @@ namespace Incubator.SocketServer.Client
 
         public virtual void Send(byte[] messageData)
         {
+            _sendEventArgs.UserToken = messageData; // 预先保存下来，使用完毕需要回收到ArrayPool中
+            Buffer.BlockCopy(messageData, 0, _sendEventArgs.Buffer, 0, messageData.Length);
             var willRaiseEvent = _client.SendAsync(_sendEventArgs);
             if (!willRaiseEvent)
             {
@@ -366,6 +383,8 @@ namespace Incubator.SocketServer.Client
             {
                 // 清理托管资源
                 _client.Dispose();
+                _readEventArgs.UserToken = null;
+                _sendEventArgs.UserToken = null;
                 _readEventArgs.Dispose();
                 _sendEventArgs.Dispose();
             }

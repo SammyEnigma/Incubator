@@ -176,6 +176,8 @@ namespace Incubator.SocketServer
                 if (package != null)
                 {
                     OnMessageSending?.Invoke(this, package);
+                    OnInnerSending(package);
+                    OnMessageSent?.Invoke(this, package);
                 }
             }
 

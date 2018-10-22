@@ -185,9 +185,9 @@ namespace Incubator.SocketServer
                                     remainingBytesToProcess = remainingBytesToProcess - prefixBytesDoneThisOp;
                                     messageLength = BitConverter.ToInt32(headBuffer, 0);
                                     ArrayPool<byte>.Shared.Return(headBuffer, true);
-                                    if (messageLength > maxMessageLength)
+                                    if (messageLength == 0 || messageLength > maxMessageLength)
                                     {
-                                        DoAbort("消息长度超过最大限制，直接丢弃");
+                                        DoAbort("消息长度为0或超过最大限制，直接丢弃");
                                     }
 
                                     _parseStatus = ParseEnum.Process_Body;
@@ -311,7 +311,10 @@ namespace Incubator.SocketServer
 
         private void DoAbort(string reason)
         {
+            Close();
             Dispose();
+            // todo: 直接被设置到task的result里面了，在listener的线程中抓不到这个异常
+            // 类似的其它异常也需要注意这种情况
             throw new ConnectionAbortedException(reason);
         }
 
@@ -385,6 +388,8 @@ namespace Incubator.SocketServer
             {
                 // 清理托管资源
                 _socket.Dispose();
+                _sendEventArgs.UserToken = null;
+                _readEventArgs.UserToken = null;
                 _socketListener.SocketAsyncSendEventArgsPool.Put(_pooledSendEventArgs);
                 _socketListener.SocketAsyncReceiveEventArgsPool.Put(_pooledReadEventArgs);
             }
