@@ -45,18 +45,25 @@ namespace Incubator.SocketServer
 
     // todo: 也许叫reactor，或者eventpump更有利于今后开展抽象
     // 比如，客户端也叫listener就很不合适
-    public abstract class BaseListener
+    public abstract class BaseListener : IDisposable
     {
-        protected bool Debug;
-        protected int BufferSize;
-        protected Socket Socket;
-        protected Thread SendMessageWorker;
-        protected ManualResetEventSlim ShutdownEvent;
-        protected BlockingCollection<Package> SendingQueue;
+        protected bool _disposed;
+        protected bool _debug;
+        protected int _bufferSize;
+        protected Socket _socket;
+        protected Thread _sendMessageWorker;
+        protected ManualResetEventSlim _shutdownEvent;
+        protected BlockingCollection<Package> _sendingQueue;
 
         internal IOCompletionPortTaskScheduler Scheduler;
-        internal ObjectPool<SocketAsyncEventArgs> SocketAsyncReceiveEventArgsPool;
-        internal ObjectPool<SocketAsyncEventArgs> SocketAsyncSendEventArgsPool;
+        internal ObjectPool<IPooledWapper> SocketAsyncReceiveEventArgsPool;
+        internal ObjectPool<IPooledWapper> SocketAsyncSendEventArgsPool;
+
+        ~BaseListener()
+        {
+            //必须为false
+            Dispose(false);
+        }
 
         public abstract void Start(IPEndPoint localEndPoint);
         public abstract void Stop();
@@ -65,14 +72,44 @@ namespace Incubator.SocketServer
 
         protected void Print(string message)
         {
-            if (Debug)
+            if (_debug)
             {
                 Console.WriteLine(message);
             }
         }
+
+        public void Dispose()
+        {
+            // 必须为true
+            Dispose(true);
+            // 通知垃圾回收机制不再调用终结器（析构器）
+            GC.SuppressFinalize(this);
+        }
+
+        protected virtual void Dispose(bool disposing)
+        {
+            if (_disposed)
+            {
+                return;
+            }
+            if (disposing)
+            {
+                // 清理托管资源
+                _shutdownEvent.Dispose();
+                _sendingQueue.Dispose();
+                Scheduler.Dispose();
+                SocketAsyncReceiveEventArgsPool.Dispose();
+                SocketAsyncSendEventArgsPool.Dispose();
+            }
+
+            // 清理非托管资源
+
+            // 让类型知道自己已经被释放
+            _disposed = true;
+        }
     }
 
-    public class SocketListener : BaseListener, IConnectionEvents, IInnerCallBack
+    public class SocketListener : BaseListener, IConnectionEvents, IInnerCallBack, IDisposable
     {
         private int _maxConnectionCount;
         private volatile int _connectedCount;
@@ -89,46 +126,52 @@ namespace Incubator.SocketServer
 
         public SocketListener(int maxConnectionCount, int bufferSize, bool debug = false)
         {
-            Debug = debug;
-            BufferSize = bufferSize;
+            _debug = debug;
+            _bufferSize = bufferSize;
             _maxConnectionCount = maxConnectionCount;
             _acceptedClientsSemaphore = new SemaphoreSlim(maxConnectionCount, maxConnectionCount);
             Scheduler = new IOCompletionPortTaskScheduler(12, 12);
             ConnectionList = new ConcurrentDictionary<int, SocketConnection>();
-            SendingQueue = new BlockingCollection<Package>();
-            SendMessageWorker = new Thread(PorcessMessageQueue);
-            ShutdownEvent = new ManualResetEventSlim(false);
+            _sendingQueue = new BlockingCollection<Package>();
+            _sendMessageWorker = new Thread(PorcessMessageQueue);
+            _shutdownEvent = new ManualResetEventSlim(false);
 
-            SocketAsyncSendEventArgsPool = new ObjectPool<SocketAsyncEventArgs>(maxConnectionCount, () =>
+            SocketAsyncSendEventArgsPool = new ObjectPool<IPooledWapper>(maxConnectionCount, 12, (pool) =>
             {
                 var socketAsyncEventArgs = new SocketAsyncEventArgs();
                 socketAsyncEventArgs.SetBuffer(ArrayPool<byte>.Shared.Rent(bufferSize), 0, bufferSize);
-                return socketAsyncEventArgs;
+                return new PooledSocketAsyncEventArgs(pool, socketAsyncEventArgs);
             });
-            SocketAsyncReceiveEventArgsPool = new ObjectPool<SocketAsyncEventArgs>(maxConnectionCount, () =>
+            SocketAsyncReceiveEventArgsPool = new ObjectPool<IPooledWapper>(maxConnectionCount, 12, (pool) =>
             {
                 var socketAsyncEventArgs = new SocketAsyncEventArgs();
                 socketAsyncEventArgs.SetBuffer(ArrayPool<byte>.Shared.Rent(bufferSize), 0, bufferSize);
-                return socketAsyncEventArgs;
+                return new PooledSocketAsyncEventArgs(pool, socketAsyncEventArgs);
             });
+        }
+
+        ~SocketListener()
+        {
+            //必须为false
+            Dispose(false);
         }
 
         public override void Start(IPEndPoint localEndPoint)
         {
-            Socket = new Socket(localEndPoint.AddressFamily, SocketType.Stream, ProtocolType.Tcp);
-            Socket.Bind(localEndPoint);
-            Socket.Listen(500);
-            SendMessageWorker.Start();
+            _socket = new Socket(localEndPoint.AddressFamily, SocketType.Stream, ProtocolType.Tcp);
+            _socket.Bind(localEndPoint);
+            _socket.Listen(500);
+            _sendMessageWorker.Start();
             StartAccept();
         }
 
         public override void Stop()
         {
-            ShutdownEvent.Set();
+            _shutdownEvent.Set();
 
             // 处理队列中剩余的消息
             Package package;
-            while (SendingQueue.TryTake(out package))
+            while (_sendingQueue.TryTake(out package))
             {
                 if (package != null)
                 {
@@ -145,13 +188,13 @@ namespace Incubator.SocketServer
                     conn.Dispose();
                 }
             }
-            Socket.Close();
+            _socket.Close();
             Dispose();
         }
 
         private void StartAccept(SocketAsyncEventArgs acceptEventArg = null)
         {
-            if (ShutdownEvent.Wait(0)) // 仅检查标志，立即返回
+            if (_shutdownEvent.Wait(0)) // 仅检查标志，立即返回
             {
                 // 关闭事件触发，退出loop
                 return;
@@ -168,7 +211,7 @@ namespace Incubator.SocketServer
             }
 
             _acceptedClientsSemaphore.Wait();
-            var willRaiseEvent = Socket.AcceptAsync(acceptEventArg);
+            var willRaiseEvent = _socket.AcceptAsync(acceptEventArg);
             if (!willRaiseEvent)
             {
                 ProcessAccept(acceptEventArg);
@@ -182,7 +225,7 @@ namespace Incubator.SocketServer
 
         private void ProcessAccept(SocketAsyncEventArgs e)
         {
-            if (ShutdownEvent.Wait(0)) // 仅检查标志，立即返回
+            if (_shutdownEvent.Wait(0)) // 仅检查标志，立即返回
             {
                 // 关闭事件触发，退出loop
                 return;
@@ -192,7 +235,7 @@ namespace Incubator.SocketServer
             try
             {
                 Interlocked.Increment(ref _connectedCount);
-                connection = new SocketConnection(_connectedCount, e.AcceptSocket, this, Debug);
+                connection = new SocketConnection(_connectedCount, e.AcceptSocket, this, _debug);
                 ConnectionList.TryAdd(_connectedCount, connection);
                 Interlocked.Increment(ref _connectedCount);
                 connection.Start();
@@ -220,7 +263,7 @@ namespace Incubator.SocketServer
 
         public override void Send(Package package)
         {
-            this.SendingQueue.Add(package);
+            this._sendingQueue.Add(package);
         }
 
         public override byte[] GetMessageBytes(string message)
@@ -241,13 +284,13 @@ namespace Incubator.SocketServer
         {
             while (true)
             {
-                if (ShutdownEvent.Wait(0)) // 仅检查标志，立即返回
+                if (_shutdownEvent.Wait(0)) // 仅检查标志，立即返回
                 {
                     // 关闭事件触发，退出loop
                     return;
                 }
 
-                var package = SendingQueue.Take();
+                var package = _sendingQueue.Take();
                 if (package != null)
                 {
                     OnMessageSending?.Invoke(this, package);
@@ -272,12 +315,23 @@ namespace Incubator.SocketServer
             OnMessageReceived?.Invoke(connection, messageData);
         }
 
-        private void Dispose()
+        protected override void Dispose(bool disposing)
         {
-            Scheduler.Dispose();
-            _acceptedClientsSemaphore.Dispose();
-            SocketAsyncSendEventArgsPool.Dispose();
-            SocketAsyncReceiveEventArgsPool.Dispose();
+            if (_disposed)
+            {
+                return;
+            }
+            if (disposing)
+            {
+                // 清理托管资源
+                _acceptedClientsSemaphore.Dispose();
+            }
+
+            // 清理非托管资源
+
+            // 让类型知道自己已经被释放
+            _disposed = true;
+            base.Dispose();
         }
     }
 }

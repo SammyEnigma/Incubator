@@ -1,45 +1,69 @@
 ﻿using System;
 using System.Collections.Concurrent;
 using System.Threading;
+using System.Threading.Tasks;
 
 namespace Incubator.SocketServer
 {
-    public class ObjectPool<T>
+    public interface IPooledWapper : IDisposable
     {
-        private int _capacity;
-        private bool _disposed;
-        private SemaphoreSlim _semslots;
-        private ConcurrentBag<T> _objects;
+        DateTime LastGetTime { set; get; }
+        bool IsDisposed { get; }
+    }
 
-        public ObjectPool(int capacity, Func<T> objectGenerator)
+    public sealed class ObjectPool<T> : IDisposable where T : IPooledWapper
+    {
+        private bool _disposed;
+        private int _minRetained;
+        private int _maxRetained;
+        private SemaphoreSlim _solts;
+        private ConcurrentBag<T> _objects;
+        private Func<ObjectPool<T>, T> _objectGenerator;
+        public bool IsDisposed { get { return _disposed; } }
+
+        public ObjectPool(int maxRetained, int minRetained, Func<ObjectPool<T>, T> objectGenerator)
         {
-            if (capacity < 1)
-                throw new ArgumentException("capacity不能小于1");
             if (objectGenerator == null)
                 throw new ArgumentNullException("objectGenerator不能为空");
+            if (maxRetained < 1)
+                throw new ArgumentException("maxRetained不能为负");
+            if (minRetained < 1)
+                throw new ArgumentException("minRetained不能为负");
+            if (maxRetained < minRetained)
+                throw new ArgumentException("maxRetained不能小于minRetained");
 
-            _capacity = capacity;
             _disposed = false;
+            _minRetained = minRetained;
+            _maxRetained = maxRetained;
+            _objectGenerator = objectGenerator;
             _objects = new ConcurrentBag<T>();
-            _semslots = new SemaphoreSlim(capacity);
+            _solts = new SemaphoreSlim(_maxRetained, _maxRetained);
 
-            T item;
-            for (int i = 0; i < capacity; i++)
+            // 预先初始化
+            if (_minRetained > 0)
             {
-                item = objectGenerator();
-                this._objects.Add(item);
+                Parallel.For(0, _minRetained, i => _objects.Add(_objectGenerator(this)));
             }
         }
 
-        public T Pop()
+        ~ObjectPool()
         {
-            _semslots.Wait();
+            //必须为false
+            Dispose(false);
+        }
+
+        public T Get()
+        {
+            _solts.Wait();
             T item;
-            _objects.TryTake(out item);
+            if (!_objects.TryTake(out item))
+            {
+                item = _objectGenerator(this);
+            }
             return item;
         }
 
-        public void Push(T item)
+        public void Put(T item)
         {
             // ConcurrentBag是支持null对象的，所以这里只能自己判断
             if (item == null)
@@ -48,16 +72,37 @@ namespace Incubator.SocketServer
             }
 
             _objects.Add(item);
-            _semslots.Release();
+            _solts.Release();
         }
 
         public void Dispose()
         {
-            if (!_disposed)
+            // 必须为true
+            Dispose(true);
+            // 通知垃圾回收机制不再调用终结器（析构器）
+            GC.SuppressFinalize(this);
+        }
+
+        private void Dispose(bool disposing)
+        {
+            if (_disposed)
             {
-                _disposed = true;
-                _semslots.Dispose();
+                return;
             }
+            if (disposing)
+            {
+                // 清理托管资源
+                foreach (var item in _objects)
+                {
+                    item.Dispose();
+                }
+                _solts.Dispose();
+            }
+
+            // 清理非托管资源
+
+            // 让类型知道自己已经被释放
+            _disposed = true;
         }
     }
 }

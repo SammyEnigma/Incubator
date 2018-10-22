@@ -27,7 +27,7 @@ namespace Incubator.SocketServer
         }
     }
 
-    public class SocketConnection : IConnection
+    public class SocketConnection : IConnection, IDisposable
     {
         private enum ParseEnum
         {
@@ -45,8 +45,11 @@ namespace Incubator.SocketServer
 
         int _id;
         bool _debug;
+        bool _disposed;
         Socket _socket;
         BaseListener _socketListener;
+        PooledSocketAsyncEventArgs _pooledReadEventArgs;
+        PooledSocketAsyncEventArgs _pooledSendEventArgs;
         SocketAsyncEventArgs _readEventArgs;
         SocketAsyncEventArgs _sendEventArgs;
 
@@ -74,10 +77,19 @@ namespace Incubator.SocketServer
             _socketListener = listener;
             _parseStatus = ParseEnum.Received;
             _socket = socket;
-            _readEventArgs = _socketListener.SocketAsyncReceiveEventArgsPool.Pop();
+            _pooledReadEventArgs = _socketListener.SocketAsyncReceiveEventArgsPool.Get() as PooledSocketAsyncEventArgs;
+            _readEventArgs = _pooledReadEventArgs.SocketAsyncEvent;
             _readEventArgs.Completed += IO_Completed;
-            _sendEventArgs = _socketListener.SocketAsyncSendEventArgsPool.Pop();
+
+            _pooledSendEventArgs = _socketListener.SocketAsyncSendEventArgsPool.Get() as PooledSocketAsyncEventArgs;
+            _sendEventArgs = _pooledSendEventArgs.SocketAsyncEvent;
             _sendEventArgs.Completed += IO_Completed;
+        }
+
+        ~SocketConnection()
+        {
+            //必须为false
+            Dispose(false);
         }
 
         public void Start()
@@ -110,14 +122,15 @@ namespace Incubator.SocketServer
             {
             }
             _socket.Close();
-            _socketListener.SocketAsyncSendEventArgsPool.Push(_sendEventArgs);
-            _socketListener.SocketAsyncReceiveEventArgsPool.Push(_readEventArgs);
             Interlocked.CompareExchange(ref _execStatus, SHUTDOWN, SHUTTING_DOWN);
-        }
+        }        
 
         public void Dispose()
         {
-            Close();
+            // 必须为true
+            Dispose(true);
+            // 通知垃圾回收机制不再调用终结器（析构器）
+            GC.SuppressFinalize(this);
         }
 
         private void ProcessReceive(SocketAsyncEventArgs e)
@@ -306,8 +319,7 @@ namespace Incubator.SocketServer
 
         private void DoAbort(string reason)
         {
-            _socketListener.SocketAsyncSendEventArgsPool.Push(_sendEventArgs);
-            _socketListener.SocketAsyncReceiveEventArgsPool.Push(_readEventArgs);
+            Dispose();
             throw new ConnectionAbortedException(reason);
         }
 
@@ -361,6 +373,26 @@ namespace Incubator.SocketServer
             {
                 Console.WriteLine(message);
             }
+        }
+
+        private void Dispose(bool disposing)
+        {
+            if (_disposed)
+            {
+                return;
+            }
+            if (disposing)
+            {
+                // 清理托管资源
+                _socket.Dispose();
+                _socketListener.SocketAsyncSendEventArgsPool.Put(_pooledSendEventArgs);
+                _socketListener.SocketAsyncReceiveEventArgsPool.Put(_pooledReadEventArgs);
+            }
+
+            // 清理非托管资源
+
+            // 让类型知道自己已经被释放
+            _disposed = true;
         }
     }
 }

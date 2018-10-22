@@ -44,6 +44,8 @@ namespace Incubator.SocketServer.Client
         {
             _debug = debug;
             _bufferSize = bufferSize;
+            _connectTimeout = 5 * 1000;
+            _client = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
             _readEventArgs = new SocketAsyncEventArgs();
             _readEventArgs.SetBuffer(ArrayPool<byte>.Shared.Rent(_bufferSize), 0, _bufferSize);
             _sendEventArgs = new SocketAsyncEventArgs();
