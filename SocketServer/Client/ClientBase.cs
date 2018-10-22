@@ -18,11 +18,11 @@ namespace Incubator.SocketServer.Client
         }
 
         bool _debug;
+        bool _disposed;
         int _bufferSize;
         int _connectTimeout; // 单位毫秒
         Socket _client;
         IPEndPoint _remoteEndPoint;
-        ManualResetEventSlim _closeEvent;
         SocketAsyncEventArgs _readEventArgs;
         SocketAsyncEventArgs _sendEventArgs;
 
@@ -43,6 +43,7 @@ namespace Incubator.SocketServer.Client
         public ClientBase(string address, int port, int bufferSize, bool debug = false)
         {
             _debug = debug;
+            _disposed = false;
             _bufferSize = bufferSize;
             _connectTimeout = 5 * 1000;
             _client = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
@@ -51,6 +52,12 @@ namespace Incubator.SocketServer.Client
             _sendEventArgs = new SocketAsyncEventArgs();
             _sendEventArgs.SetBuffer(ArrayPool<byte>.Shared.Rent(_bufferSize), 0, _bufferSize);
             _remoteEndPoint = new IPEndPoint(IPAddress.Parse(address), port);
+        }
+
+        ~ClientBase()
+        {
+            //必须为false
+            Dispose(false);
         }
 
         public virtual void Connect()
@@ -101,10 +108,6 @@ namespace Incubator.SocketServer.Client
             {
             }
             _client.Close();
-        }
-
-        public virtual void Dispose()
-        {
         }
 
         private void ProcessReceive(SocketAsyncEventArgs e)
@@ -343,6 +346,34 @@ namespace Incubator.SocketServer.Client
             {
                 Console.WriteLine(message);
             }
+        }
+
+        public void Dispose()
+        {
+            // 必须为true
+            Dispose(true);
+            // 通知垃圾回收机制不再调用终结器（析构器）
+            GC.SuppressFinalize(this);
+        }
+
+        protected virtual void Dispose(bool disposing)
+        {
+            if (_disposed)
+            {
+                return;
+            }
+            if (disposing)
+            {
+                // 清理托管资源
+                _client.Dispose();
+                _readEventArgs.Dispose();
+                _sendEventArgs.Dispose();
+            }
+
+            // 清理非托管资源
+
+            // 让类型知道自己已经被释放
+            _disposed = true;
         }
     }
 }

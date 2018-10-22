@@ -123,14 +123,6 @@ namespace Incubator.SocketServer
             }
             _socket.Close();
             Interlocked.CompareExchange(ref _execStatus, SHUTDOWN, SHUTTING_DOWN);
-        }        
-
-        public void Dispose()
-        {
-            // 必须为true
-            Dispose(true);
-            // 通知垃圾回收机制不再调用终结器（析构器）
-            GC.SuppressFinalize(this);
         }
 
         private void ProcessReceive(SocketAsyncEventArgs e)
@@ -373,6 +365,14 @@ namespace Incubator.SocketServer
             {
                 Console.WriteLine(message);
             }
+        }
+
+        public void Dispose()
+        {
+            // 必须为true
+            Dispose(true);
+            // 通知垃圾回收机制不再调用终结器（析构器）
+            GC.SuppressFinalize(this);
         }
 
         private void Dispose(bool disposing)
