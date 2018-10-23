@@ -10,7 +10,7 @@ namespace Incubator.SocketServer
 {
     public class Package
     {
-        public object Connection { set; get; }
+        public SocketConnection Connection { set; get; }
         public byte[] MessageData { set; get; }
         public int DataLength { set; get; }
     }
@@ -30,7 +30,7 @@ namespace Incubator.SocketServer
     // 用来模拟友元（访问控制）
     public interface IInnerCallBack
     {
-        void MessageReceived(SocketConnection connection, byte[] messageData);
+        void MessageReceived(SocketConnection connection, byte[] messageData, int length);
         void ConnectionClosed(ConnectionInfo connectionInfo);
     }
 
@@ -39,7 +39,7 @@ namespace Incubator.SocketServer
         event EventHandler<ConnectionInfo> OnConnectionCreated;
         event EventHandler<ConnectionInfo> OnConnectionClosed;
         event EventHandler<ConnectionInfo> OnConnectionAborted;
-        event EventHandler<byte[]> OnMessageReceived;
+        event EventHandler<Package> OnMessageReceived;
         event EventHandler<Package> OnMessageSending;
         event EventHandler<Package> OnMessageSent;
     }
@@ -68,8 +68,22 @@ namespace Incubator.SocketServer
 
         public abstract void Start(IPEndPoint localEndPoint);
         public abstract void Stop();
-        public abstract void Send(Package package);
-        public abstract byte[] GetMessageBytes(string message, out int length);
+        public abstract void Send(SocketConnection connection, string message);
+        public abstract void Send(SocketConnection connection, byte[] messageData, int length);
+        protected virtual byte[] GetMessageBytes(string message, out int length)
+        {
+            var body = message;
+            var body_bytes = Encoding.UTF8.GetBytes(body);
+            var head = body_bytes.Length;
+            var head_bytes = BitConverter.GetBytes(head);
+            length = head_bytes.Length + body_bytes.Length;
+            var bytes = ArrayPool<byte>.Shared.Rent(length);
+
+            Buffer.BlockCopy(head_bytes, 0, bytes, 0, head_bytes.Length);
+            Buffer.BlockCopy(body_bytes, 0, bytes, head_bytes.Length, body_bytes.Length);
+
+            return bytes;
+        }
 
         protected void Print(string message)
         {
@@ -119,7 +133,7 @@ namespace Incubator.SocketServer
         public event EventHandler<ConnectionInfo> OnConnectionCreated;
         public event EventHandler<ConnectionInfo> OnConnectionClosed;
         public event EventHandler<ConnectionInfo> OnConnectionAborted;
-        public event EventHandler<byte[]> OnMessageReceived;
+        public event EventHandler<Package> OnMessageReceived;
         public event EventHandler<Package> OnMessageSending;
         public event EventHandler<Package> OnMessageSent;
         #endregion
@@ -264,24 +278,16 @@ namespace Incubator.SocketServer
             StartAccept(e);
         }
 
-        public override void Send(Package package)
+        public override void Send(SocketConnection connection, string message)
         {
-            this._sendingQueue.Add(package);
+            var length = 0;
+            var bytes = GetMessageBytes(message, out length);
+            _sendingQueue.Add(new Package { Connection = connection, MessageData = bytes, DataLength = length });
         }
 
-        public override byte[] GetMessageBytes(string message, out int length)
+        public override void Send(SocketConnection connection, byte[] messageData, int length)
         {
-            var body = message;
-            var body_bytes = Encoding.UTF8.GetBytes(body);
-            var head = body_bytes.Length;
-            var head_bytes = BitConverter.GetBytes(head);
-            length = head_bytes.Length + body_bytes.Length;
-            var bytes = ArrayPool<byte>.Shared.Rent(length);
-            
-            Buffer.BlockCopy(head_bytes, 0, bytes, 0, head_bytes.Length);
-            Buffer.BlockCopy(body_bytes, 0, bytes, head_bytes.Length, body_bytes.Length);
-
-            return bytes;
+            _sendingQueue.Add(new Package { Connection = connection, MessageData = messageData, DataLength = length });
         }
 
         private void PorcessMessageQueue()
@@ -306,7 +312,7 @@ namespace Incubator.SocketServer
 
         private void OnInnerSending(Package package)
         {
-            ((SocketConnection)package.Connection).InnerSend(package);
+            package.Connection.InnerSend(package);
         }
 
         public void ConnectionClosed(ConnectionInfo connectionInfo)
@@ -314,9 +320,9 @@ namespace Incubator.SocketServer
             OnConnectionClosed?.Invoke(this, connectionInfo);
         }
 
-        public void MessageReceived(SocketConnection connection, byte[] messageData)
+        public void MessageReceived(SocketConnection connection, byte[] messageData, int length)
         {
-            OnMessageReceived?.Invoke(connection, messageData);
+            OnMessageReceived?.Invoke(this, new Package { Connection = connection, MessageData = messageData, DataLength = length });
         }
 
         protected override void Dispose(bool disposing)

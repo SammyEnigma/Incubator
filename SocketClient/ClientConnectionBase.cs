@@ -313,7 +313,7 @@ namespace Incubator.SocketClient
             throw new ConnectionAbortedException(reason);
         }
 
-        private void MessageReceived(byte[] messageData, int length)
+        protected virtual void MessageReceived(byte[] messageData, int length)
         {
             Console.WriteLine("收到服务端返回：" + Encoding.UTF8.GetString(messageData, 0, length));
         }

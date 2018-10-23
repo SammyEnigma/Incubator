@@ -265,7 +265,7 @@ namespace Incubator.SocketServer
                         break;
                     case ParseEnum.Find_Body:
                         {
-                            MessageReceived(bodyBuffer);
+                            MessageReceived(bodyBuffer, messageLength);
                             if (remainingBytesToProcess == 0)
                             {
                                 messageLength = 0;
@@ -318,9 +318,9 @@ namespace Incubator.SocketServer
             throw new ConnectionAbortedException(reason);
         }
 
-        private void MessageReceived(byte[] messageData)
+        private void MessageReceived(byte[] messageData, int length)
         {
-            (_socketListener as IInnerCallBack).MessageReceived(this, messageData);
+            (_socketListener as IInnerCallBack).MessageReceived(this, messageData, length);
         }
 
         internal void InnerSend(Package package)

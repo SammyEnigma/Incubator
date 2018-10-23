@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Net;
+using System.Text;
 
 namespace Incubator.SocketServer
 {
@@ -76,13 +77,11 @@ namespace Incubator.SocketServer
             Console.WriteLine("连接被强制终止：" + e);
         }
 
-        private void On_MessageReceived(object sender, byte[] e)
+        private void On_MessageReceived(object sender, Package e)
         {
-            Console.WriteLine("收到客户端消息：" + System.Text.Encoding.UTF8.GetString(e));
-            var length = 0;
-            var response = "go fuck yourself";
-            var bytes = _listener.GetMessageBytes(response, out length);
-            _listener.Send(new Package { Connection = sender, MessageData = bytes, DataLength = length });
+            Console.WriteLine("收到客户端消息：" + Encoding.UTF8.GetString(e.MessageData, 0, e.DataLength));
+            var response = "go fuck yourself";            
+            _listener.Send(e.Connection, response);
         }
 
         private void On_MessageSending(object sender, Package e)
