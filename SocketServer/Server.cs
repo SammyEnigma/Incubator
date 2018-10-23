@@ -79,8 +79,10 @@ namespace Incubator.SocketServer
         private void On_MessageReceived(object sender, byte[] e)
         {
             Console.WriteLine("收到客户端消息：" + System.Text.Encoding.UTF8.GetString(e));
+            var length = 0;
             var response = "go fuck yourself";
-            _listener.Send(new Package { Connection = sender, MessageData = _listener.GetMessageBytes(response) });
+            var bytes = _listener.GetMessageBytes(response, out length);
+            _listener.Send(new Package { Connection = sender, MessageData = bytes, DataLength = length });
         }
 
         private void On_MessageSending(object sender, Package e)

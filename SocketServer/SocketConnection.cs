@@ -327,9 +327,10 @@ namespace Incubator.SocketServer
         {
             _sendEventArgs.UserToken = package.MessageData; // 预先保存下来，使用完毕需要回收到ArrayPool中
             // todo: 缓冲区一次发送不完的情况处理
-            Buffer.BlockCopy(package.MessageData, 0,  _sendEventArgs.Buffer, 0, package.MessageData.Length);
+            Buffer.BlockCopy(package.MessageData, 0,  _sendEventArgs.Buffer, 0, package.DataLength);
             // todo: abort和这里的send会有一个race condition，目前考虑的解决办法是abort那里自旋一段时间等
             // 当次发送完毕了再予以关闭
+            _sendEventArgs.SetBuffer(0, package.DataLength);
             var willRaiseEvent = _socket.SendAsync(_sendEventArgs);
             if (!willRaiseEvent)
             {
@@ -391,7 +392,9 @@ namespace Incubator.SocketServer
                 // 清理托管资源
                 _socket.Dispose();
                 _sendEventArgs.UserToken = null;
+                _sendEventArgs.Completed -= IO_Completed;
                 _readEventArgs.UserToken = null;
+                _readEventArgs.Completed -= IO_Completed;
                 _socketListener.SocketAsyncSendEventArgsPool.Put(_pooledSendEventArgs);
                 _socketListener.SocketAsyncReceiveEventArgsPool.Put(_pooledReadEventArgs);
             }

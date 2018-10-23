@@ -12,6 +12,7 @@ namespace Incubator.SocketServer
     {
         public object Connection { set; get; }
         public byte[] MessageData { set; get; }
+        public int DataLength { set; get; }
     }
 
     public class ConnectionInfo
@@ -68,7 +69,7 @@ namespace Incubator.SocketServer
         public abstract void Start(IPEndPoint localEndPoint);
         public abstract void Stop();
         public abstract void Send(Package package);
-        public abstract byte[] GetMessageBytes(string message);
+        public abstract byte[] GetMessageBytes(string message, out int length);
 
         protected void Print(string message)
         {
@@ -268,14 +269,15 @@ namespace Incubator.SocketServer
             this._sendingQueue.Add(package);
         }
 
-        public override byte[] GetMessageBytes(string message)
+        public override byte[] GetMessageBytes(string message, out int length)
         {
             var body = message;
             var body_bytes = Encoding.UTF8.GetBytes(body);
             var head = body_bytes.Length;
             var head_bytes = BitConverter.GetBytes(head);
-            var bytes = ArrayPool<byte>.Shared.Rent(head_bytes.Length + body_bytes.Length);
-
+            length = head_bytes.Length + body_bytes.Length;
+            var bytes = ArrayPool<byte>.Shared.Rent(length);
+            
             Buffer.BlockCopy(head_bytes, 0, bytes, 0, head_bytes.Length);
             Buffer.BlockCopy(body_bytes, 0, bytes, head_bytes.Length, body_bytes.Length);
 

@@ -52,12 +52,17 @@ namespace Incubator.SocketClient
             _disposed = false;
             _bufferSize = bufferSize;
             _connectTimeout = 5 * 1000;
+            _parseStatus = ParseEnum.Received;
             _client = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
-            _readEventArgs = new SocketAsyncEventArgs();
-            _readEventArgs.SetBuffer(ArrayPool<byte>.Shared.Rent(_bufferSize), 0, _bufferSize);
-            _sendEventArgs = new SocketAsyncEventArgs();
-            _sendEventArgs.SetBuffer(ArrayPool<byte>.Shared.Rent(_bufferSize), 0, _bufferSize);
             _remoteEndPoint = new IPEndPoint(IPAddress.Parse(address), port);
+
+            _readEventArgs = new SocketAsyncEventArgs();
+            _readEventArgs.Completed += IO_Completed;
+            _readEventArgs.SetBuffer(ArrayPool<byte>.Shared.Rent(_bufferSize), 0, _bufferSize);
+
+            _sendEventArgs = new SocketAsyncEventArgs();
+            _sendEventArgs.Completed += IO_Completed;
+            _sendEventArgs.SetBuffer(ArrayPool<byte>.Shared.Rent(_bufferSize), 0, _bufferSize);
         }
 
         ~ClientConnectionBase()
@@ -126,7 +131,6 @@ namespace Incubator.SocketClient
 
         private void ProcessReceive(SocketAsyncEventArgs e)
         {
-            Console.WriteLine(123);
             while (true)
             {
                 #region ParseLogic
@@ -259,7 +263,7 @@ namespace Incubator.SocketClient
                         break;
                     case ParseEnum.Find_Body:
                         {
-                            MessageReceived(bodyBuffer);
+                            MessageReceived(bodyBuffer, messageLength);
                             if (remainingBytesToProcess == 0)
                             {
                                 messageLength = 0;
@@ -304,18 +308,39 @@ namespace Incubator.SocketClient
 
         private void DoAbort(string reason)
         {
+            Close();
+            Dispose();
             throw new ConnectionAbortedException(reason);
         }
 
-        private void MessageReceived(byte[] messageData)
+        private void MessageReceived(byte[] messageData, int length)
         {
-
+            Console.WriteLine("收到服务端返回：" + Encoding.UTF8.GetString(messageData, 0, length));
         }
 
-        public virtual void Send(byte[] messageData)
+        public virtual void Send(byte[] messageData, int length)
         {
             _sendEventArgs.UserToken = messageData; // 预先保存下来，使用完毕需要回收到ArrayPool中
-            Buffer.BlockCopy(messageData, 0, _sendEventArgs.Buffer, 0, messageData.Length);
+
+            Buffer.BlockCopy(messageData, 0, _sendEventArgs.Buffer, 0, length);
+            _sendEventArgs.SetBuffer(0, length);
+
+            var willRaiseEvent = _client.SendAsync(_sendEventArgs);
+            if (!willRaiseEvent)
+            {
+                ProcessSend(_sendEventArgs);
+            }
+        }
+
+        public virtual void Send(string message)
+        {
+            var length = 0;
+            var bytes = GetMessageBytes(message, out length);
+            _sendEventArgs.UserToken = bytes; // 预先保存下来，使用完毕需要回收到ArrayPool中
+
+            Buffer.BlockCopy(bytes, 0, _sendEventArgs.Buffer, 0, length);
+            _sendEventArgs.SetBuffer(0, length);
+
             var willRaiseEvent = _client.SendAsync(_sendEventArgs);
             if (!willRaiseEvent)
             {
@@ -328,13 +353,14 @@ namespace Incubator.SocketClient
             ArrayPool<byte>.Shared.Return((byte[])e.UserToken);
         }
 
-        public virtual byte[] GetMessageBytes(string message)
+        protected virtual byte[] GetMessageBytes(string message, out int length)
         {
             var body = message;
             var body_bytes = Encoding.UTF8.GetBytes(body);
             var head = body_bytes.Length;
             var head_bytes = BitConverter.GetBytes(head);
-            var bytes = ArrayPool<byte>.Shared.Rent(head_bytes.Length + body_bytes.Length);
+            length = head_bytes.Length + body_bytes.Length;
+            var bytes = ArrayPool<byte>.Shared.Rent(length);
 
             Buffer.BlockCopy(head_bytes, 0, bytes, 0, head_bytes.Length);
             Buffer.BlockCopy(body_bytes, 0, bytes, head_bytes.Length, body_bytes.Length);
