@@ -1,4 +1,5 @@
-﻿using Newtonsoft.Json;
+﻿using Incubator.SocketServer;
+using Newtonsoft.Json;
 using System;
 using System.Collections.Concurrent;
 using System.IO;
@@ -24,21 +25,30 @@ namespace Incubator.SocketClient.Rpc
         void SyncInterface(Type serviceType);
     }
 
-    public class RpcConnection : ClientConnectionBase, IRpcCall
+    public class RpcConnection : ClientConnectionBase, IRpcCall, IPooledWapper
     {
-        private object _syncRoot = new object();
-        protected Type _serviceType;
-        protected BinaryReader _binReader;
-        protected BinaryWriter _binWriter;
-        private ParameterTransferHelper _parameterTransferHelper = new ParameterTransferHelper();
-        private ServiceSyncInfo _syncInfo;
+        object _syncRoot = new object();
+        bool _disposed;
+        Type _serviceType;
+        BinaryReader _binReader;
+        BinaryWriter _binWriter;
+        ParameterTransferHelper _parameterTransferHelper = new ParameterTransferHelper();
+        ServiceSyncInfo _syncInfo;
+
+        ObjectPool<IPooledWapper> _pool;
+        public DateTime LastGetTime { set; get; }
+
+        public bool IsDisposed => this._disposed;
 
         // keep cached sync info to avoid redundant wire trips
         private static ConcurrentDictionary<Type, ServiceSyncInfo> _syncInfoCache = new ConcurrentDictionary<Type, ServiceSyncInfo>();
 
-        public RpcConnection(string address, int port, int bufferSize, bool debug = false)
+        public RpcConnection(
+            ObjectPool<IPooledWapper> pool,
+            string address, int port, int bufferSize, bool debug = false)
             : base(address, port, bufferSize, debug)
         {
+            _pool = pool;
         }
 
         public object[] InvokeMethod(string metaData, params object[] parameters)
@@ -136,5 +146,5 @@ namespace Incubator.SocketClient.Rpc
                 _syncInfoCache.AddOrUpdate(serviceType, _syncInfo, (t, info) => _syncInfo);
             }
         }
-    }
+    }    
 }

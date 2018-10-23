@@ -9,7 +9,7 @@ using System.Threading.Tasks;
 
 namespace Incubator.SocketClient
 {
-    public class ClientConnectionBase : IDisposable, IPooledWapper
+    public class ClientConnectionBase : IDisposable
     {
         private enum ParseEnum
         {
@@ -41,10 +41,6 @@ namespace Incubator.SocketClient
         int messageBytesDoneCount = 0;
         int messageBytesDoneThisOp = 0;
         int remainingBytesToProcess = 0;
-
-        public DateTime LastGetTime { set; get; }
-
-        public bool IsDisposed => this._disposed;
 
         public ClientConnectionBase(string address, int port, int bufferSize, bool debug = false)
         {
