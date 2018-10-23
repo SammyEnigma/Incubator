@@ -1,4 +1,5 @@
-﻿using System;
+﻿using Newtonsoft.Json;
+using System;
 using System.Collections.Concurrent;
 using System.IO;
 
@@ -109,13 +110,21 @@ namespace Incubator.SocketClient.Rpc
             }
         }
 
+        class SyncInterfaceInfo
+        {
+            public int Type;
+            public string FullName;
+        }
+
         public void SyncInterface(Type serviceType)
         {            
             if (!_syncInfoCache.TryGetValue(serviceType, out _syncInfo))
             {
+                var obj = new SyncInterfaceInfo { Type = (int)MessageType.SyncInterface, FullName = serviceType.FullName };
                 //write the message type                
-                _binWriter.Write((int)MessageType.SyncInterface);
-                _binWriter.Write(serviceType.FullName);
+                //_binWriter.Write((int)MessageType.SyncInterface);
+                //_binWriter.Write(serviceType.FullName);
+                Send(JsonConvert.SerializeObject(obj));
 
                 //read sync data
                 var len = _binReader.ReadInt32();
