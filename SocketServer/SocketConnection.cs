@@ -159,6 +159,7 @@ namespace Incubator.SocketServer
                             else
                             {
                                 DoAbort("e.SocketError != SocketError.Success");
+                                return;
                             }
                         }
                         break;
@@ -188,6 +189,7 @@ namespace Incubator.SocketServer
                                     if (messageLength == 0 || messageLength > maxMessageLength)
                                     {
                                         DoAbort("消息长度为0或超过最大限制，直接丢弃");
+                                        return;
                                     }
 
                                     _parseStatus = ParseEnum.Process_Body;
