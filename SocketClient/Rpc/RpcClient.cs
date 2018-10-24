@@ -29,9 +29,11 @@ namespace Incubator.SocketClient.Rpc
     {
         bool _debug;
         object _syncRoot;
+        volatile int _received;
         MemoryStream _stream;
         BinaryWriter _binWriter;
         ServiceSyncInfo _syncInfo;
+        object[] outParams;
         ObjectPool<IPooledWapper> _connectionPool;
         ParameterTransferHelper _parameterTransferHelper;
         // keep cached sync info to avoid redundant wire trips
@@ -126,10 +128,12 @@ namespace Incubator.SocketClient.Rpc
                             if (messageType == MessageType.UnknownMethod)
                                 throw new Exception("Unknown method.");
 
-                            object[] outParams = _parameterTransferHelper.ReceiveParameters(br);
+                            outParams = _parameterTransferHelper.ReceiveParameters(br);
 
                             if (messageType == MessageType.ThrowException)
                                 throw (Exception)outParams[0];
+
+                            System.Threading.Interlocked.Exchange(ref _received, 1);
                         }
                     };
                     conn.Connect();
@@ -148,7 +152,15 @@ namespace Incubator.SocketClient.Rpc
                     conn.Send(_stream.GetBuffer(), (int)_stream.Position);
                 }
 
-                return null;
+                // todo: rpcclient继承了clientbase的异步方式，而rpc调用天然需要同步方式
+                // 后期考虑重构掉这种丑陋的异步模拟同步的方式
+                System.Threading.SpinWait spinner = new System.Threading.SpinWait();
+                while (_received == 0)
+                {
+                    spinner.SpinOnce();
+                }
+
+                return outParams;
             }
         }
     }
