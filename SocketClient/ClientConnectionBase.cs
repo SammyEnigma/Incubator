@@ -316,11 +316,13 @@ namespace Incubator.SocketClient
             Console.WriteLine("收到服务端返回：" + Encoding.UTF8.GetString(messageData, 0, length));
         }
 
-        public virtual void Send(byte[] messageData, int length)
+        public virtual void Send(byte[] messageData, int length, bool recyle = true)
         {
-            _sendEventArgs.UserToken = messageData; // 预先保存下来，使用完毕需要回收到ArrayPool中
+            if (recyle)
+                _sendEventArgs.UserToken = messageData; // 预先保存下来，使用完毕需要回收到ArrayPool中
 
-            Buffer.BlockCopy(messageData, 0, _sendEventArgs.Buffer, 0, length);
+            Buffer.BlockCopy(BitConverter.GetBytes(length), 0, _sendEventArgs.Buffer, 0, 4);
+            Buffer.BlockCopy(messageData, 0, _sendEventArgs.Buffer, 4, length);
             _sendEventArgs.SetBuffer(0, length);
 
             var willRaiseEvent = _client.SendAsync(_sendEventArgs);
@@ -348,7 +350,8 @@ namespace Incubator.SocketClient
 
         private void ProcessSend(SocketAsyncEventArgs e)
         {
-            ArrayPool<byte>.Shared.Return((byte[])e.UserToken);
+            if (e.UserToken != null)
+                ArrayPool<byte>.Shared.Return((byte[])e.UserToken);
         }
 
         protected virtual byte[] GetMessageBytes(string message, out int length)

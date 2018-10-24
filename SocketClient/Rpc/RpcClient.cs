@@ -74,7 +74,7 @@ namespace Incubator.SocketClient.Rpc
                     conn.Connect();
                     _binWriter.Write((int)MessageType.SyncInterface);
                     _binWriter.Write(serviceType.FullName);
-                    conn.Send(_stream.GetBuffer(), (int)_stream.Position);
+                    conn.Send(_stream.GetBuffer(), (int)_stream.Position, false);
                 }
             }
         }
@@ -149,7 +149,7 @@ namespace Incubator.SocketClient.Rpc
                         _binWriter,
                         parameters);
 
-                    conn.Send(_stream.GetBuffer(), (int)_stream.Position);
+                    conn.Send(_stream.GetBuffer(), (int)_stream.Position, false);
                 }
 
                 // todo: rpcclient继承了clientbase的异步方式，而rpc调用天然需要同步方式

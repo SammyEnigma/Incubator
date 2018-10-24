@@ -80,7 +80,7 @@ namespace Incubator.SocketServer
         private void On_MessageReceived(object sender, Package e)
         {
             Console.WriteLine("收到客户端消息：" + Encoding.UTF8.GetString(e.MessageData, 0, e.DataLength));
-            var response = "go fuck yourself";            
+            var response = "go fuck yourself";
             _listener.Send(e.Connection, response);
         }
 

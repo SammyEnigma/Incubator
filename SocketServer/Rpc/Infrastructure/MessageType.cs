@@ -1,4 +1,4 @@
-namespace Incubator.SocketClient.Rpc
+namespace Incubator.SocketServer.Rpc
 {
     public enum MessageType
     {
