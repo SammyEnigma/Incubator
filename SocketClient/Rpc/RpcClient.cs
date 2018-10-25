@@ -43,7 +43,7 @@ namespace Incubator.SocketClient.Rpc
         {
             _debug = debug;
             _syncRoot = new object();
-            _stream = new MemoryStream(512);
+            _stream = new MemoryStream();
             _binWriter = new BinaryWriter(_stream, Encoding.UTF8);
             _parameterTransferHelper = new ParameterTransferHelper();
             _connectionPool = new ObjectPool<IPooledWapper>(12, 4, pool => new RpcConnection(pool, address, port, 256, _debug));
@@ -67,9 +67,11 @@ namespace Incubator.SocketClient.Rpc
                 {
                     conn.OnMessageReceived += (sender, e) =>
                     {
+                        _binWriter.Seek(0, SeekOrigin.Begin);
+                        _stream.Seek(0, SeekOrigin.Begin);
+
                         _syncInfo = e.MessageData.ToDeserializedObject<ServiceSyncInfo>();
                         _syncInfoCache.AddOrUpdate(serviceType, _syncInfo, (t, info) => _syncInfo);
-                        _binWriter.Seek(0, SeekOrigin.Begin);
                     };
                     conn.Connect();
                     _binWriter.Write((int)MessageType.SyncInterface);
@@ -122,6 +124,9 @@ namespace Incubator.SocketClient.Rpc
                 {
                     conn.OnMessageReceived += (sender, e) =>
                     {
+                        _binWriter.Seek(0, SeekOrigin.Begin);
+                        _stream.Seek(0, SeekOrigin.Begin);
+
                         using (MemoryStream stream = new MemoryStream(e.MessageData))
                         using (BinaryReader br = new BinaryReader(stream))
                         {

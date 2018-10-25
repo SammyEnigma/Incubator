@@ -1,6 +1,5 @@
 ﻿using Incubator.SocketServer.Rpc;
 using System;
-using System.Buffers;
 using System.Collections.Concurrent;
 using System.IO;
 using System.Net;
@@ -98,7 +97,7 @@ namespace Incubator.SocketServer
                         ProcessSync(binReader, e);
                         break;
                     case MessageType.MethodInvocation:
-                        ProcessInvocation(null, null, e);
+                        ProcessInvocation(binReader, e);
                         break;
                 }
             }
@@ -108,7 +107,7 @@ namespace Incubator.SocketServer
         {
             var syncCat = "Sync";
             var serviceTypeName = binReader.ReadString();
-            
+
             int serviceKey;
             if (_serviceKeys.TryGetValue(serviceTypeName, out serviceKey))
             {
@@ -127,7 +126,7 @@ namespace Incubator.SocketServer
             }
         }
 
-        private void ProcessInvocation(BinaryReader binReader, BinaryWriter binWriter, Package e)
+        private void ProcessInvocation(BinaryReader binReader, Package e)
         {
             //read service instance key
             var cat = "unknown";
@@ -135,62 +134,64 @@ namespace Incubator.SocketServer
             var invokedServiceKey = binReader.ReadInt32();
 
             ServiceInstance invokedInstance;
-            if (_services.TryGetValue(invokedServiceKey, out invokedInstance))
+            using (MemoryStream stream = new MemoryStream(512))
+            using (BinaryWriter binWriter = new BinaryWriter(stream, Encoding.UTF8))
             {
-                cat = invokedInstance.InterfaceType.Name;
-                //read the method identifier
-                int methodHashCode = binReader.ReadInt32();
-                if (invokedInstance.InterfaceMethods.ContainsKey(methodHashCode))
+                if (_services.TryGetValue(invokedServiceKey, out invokedInstance))
                 {
-                    MethodInfo method;
-                    invokedInstance.InterfaceMethods.TryGetValue(methodHashCode, out method);
-                    stat = method.Name;
-
-                    bool[] isByRef;
-                    invokedInstance.MethodParametersByRef.TryGetValue(methodHashCode, out isByRef);
-
-                    //read parameter data
-                    object[] parameters = _parameterTransferHelper.ReceiveParameters(binReader);
-
-                    //invoke the method
-                    object[] returnParameters;
-                    var returnMessageType = MessageType.ReturnValues;
-                    try
+                    cat = invokedInstance.InterfaceType.Name;
+                    //read the method identifier
+                    int methodHashCode = binReader.ReadInt32();
+                    if (invokedInstance.InterfaceMethods.ContainsKey(methodHashCode))
                     {
-                        object returnValue = method.Invoke(invokedInstance.SingletonInstance, parameters);
-                        //the result to the client is the return value (null if void) and the input parameters
-                        returnParameters = new object[1 + parameters.Length];
-                        returnParameters[0] = returnValue;
-                        for (int i = 0; i < parameters.Length; i++)
-                            returnParameters[i + 1] = isByRef[i] ? parameters[i] : null;
-                    }
-                    catch (Exception ex)
-                    {
-                        //an exception was caught. Rethrow it client side
-                        returnParameters = new object[] { ex };
-                        returnMessageType = MessageType.ThrowException;
-                    }
+                        MethodInfo method;
+                        invokedInstance.InterfaceMethods.TryGetValue(methodHashCode, out method);
+                        stat = method.Name;
 
-                    //send the result back to the client
-                    // (1) write the message type
-                    binWriter.Write((int)returnMessageType);
+                        bool[] isByRef;
+                        invokedInstance.MethodParametersByRef.TryGetValue(methodHashCode, out isByRef);
 
-                    // (2) write the return parameters
-                    _parameterTransferHelper.SendParameters(
-                        invokedInstance.ServiceSyncInfo.UseCompression,
-                        invokedInstance.ServiceSyncInfo.CompressionThreshold,
-                        binWriter,
-                        returnParameters);
-                    
+                        //read parameter data
+                        object[] parameters = _parameterTransferHelper.ReceiveParameters(binReader);
+
+                        //invoke the method
+                        object[] returnParameters;
+                        var returnMessageType = MessageType.ReturnValues;
+                        try
+                        {
+                            object returnValue = method.Invoke(invokedInstance.SingletonInstance, parameters);
+                            //the result to the client is the return value (null if void) and the input parameters
+                            returnParameters = new object[1 + parameters.Length];
+                            returnParameters[0] = returnValue;
+                            for (int i = 0; i < parameters.Length; i++)
+                                returnParameters[i + 1] = isByRef[i] ? parameters[i] : null;
+                        }
+                        catch (Exception ex)
+                        {
+                            //an exception was caught. Rethrow it client side
+                            returnParameters = new object[] { ex };
+                            returnMessageType = MessageType.ThrowException;
+                        }
+
+                        //send the result back to the client
+                        // (1) write the message type
+                        binWriter.Write((int)returnMessageType);
+
+                        // (2) write the return parameters
+                        _parameterTransferHelper.SendParameters(
+                            invokedInstance.ServiceSyncInfo.UseCompression,
+                            invokedInstance.ServiceSyncInfo.CompressionThreshold,
+                            binWriter,
+                            returnParameters);
+                    }
+                    else
+                        binWriter.Write((int)MessageType.UnknownMethod);
                 }
                 else
                     binWriter.Write((int)MessageType.UnknownMethod);
-            }
-            else
-                binWriter.Write((int)MessageType.UnknownMethod);
 
-            //flush
-            binWriter.Flush();
+                _listener.Send(e.Connection, stream.GetBuffer(), (int)stream.Position, false);
+            }
         }
     }
 }
