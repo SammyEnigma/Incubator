@@ -99,11 +99,13 @@ namespace Incubator.SocketClient.Rpc
                         {
                             var matchingParameterTypes = true;
                             for (int i = 0; i < si.ParameterTypes.Length; i++)
+                            {
                                 if (!mdata[i + 1].Equals(si.ParameterTypes[i].FullName))
                                 {
                                     matchingParameterTypes = false;
                                     break;
                                 }
+                            }
                             if (matchingParameterTypes)
                             {
                                 ident = si.MethodIdent;

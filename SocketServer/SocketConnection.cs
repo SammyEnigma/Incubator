@@ -327,12 +327,26 @@ namespace Incubator.SocketServer
 
         internal void InnerSend(Package package)
         {
-            _sendEventArgs.UserToken = package.MessageData; // 预先保存下来，使用完毕需要回收到ArrayPool中
+            if (package.RentFromPool)
+                _sendEventArgs.UserToken = package.MessageData; // 预先保存下来，使用完毕需要回收到ArrayPool中
+
             // todo: 缓冲区一次发送不完的情况处理
-            Buffer.BlockCopy(package.MessageData, 0,  _sendEventArgs.Buffer, 0, package.DataLength);
-            // todo: abort和这里的send会有一个race condition，目前考虑的解决办法是abort那里自旋一段时间等
-            // 当次发送完毕了再予以关闭
-            _sendEventArgs.SetBuffer(0, package.DataLength);
+            if (package.NeedHead)
+            {
+                Buffer.BlockCopy(BitConverter.GetBytes(package.DataLength), 0, _sendEventArgs.Buffer, 0, 4);
+                Buffer.BlockCopy(package.MessageData, 0, _sendEventArgs.Buffer, 4, package.DataLength);
+                // todo: abort和这里的send会有一个race condition，目前考虑的解决办法是abort那里自旋一段时间等
+                // 当次发送完毕了再予以关闭
+                _sendEventArgs.SetBuffer(0, package.DataLength + 4);
+            }
+            else
+            {
+                Buffer.BlockCopy(package.MessageData, 0, _sendEventArgs.Buffer, 0, package.DataLength);
+                // todo: abort和这里的send会有一个race condition，目前考虑的解决办法是abort那里自旋一段时间等
+                // 当次发送完毕了再予以关闭
+                _sendEventArgs.SetBuffer(0, package.DataLength);
+            }
+
             var willRaiseEvent = _socket.SendAsync(_sendEventArgs);
             if (!willRaiseEvent)
             {
@@ -342,7 +356,8 @@ namespace Incubator.SocketServer
 
         private void ProcessSend(SocketAsyncEventArgs e)
         {
-            ArrayPool<byte>.Shared.Return((byte[])e.UserToken);
+            if (e.UserToken != null)
+                ArrayPool<byte>.Shared.Return((byte[])e.UserToken);
         }
 
         private void IO_Completed(object sender, SocketAsyncEventArgs e)

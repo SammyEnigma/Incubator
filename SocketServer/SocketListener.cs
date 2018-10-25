@@ -13,6 +13,8 @@ namespace Incubator.SocketServer
         public SocketConnection Connection { set; get; }
         public byte[] MessageData { set; get; }
         public int DataLength { set; get; }
+        public bool RentFromPool { set; get; }
+        public bool NeedHead { set; get; }
     }
 
     public class ConnectionInfo
@@ -69,7 +71,7 @@ namespace Incubator.SocketServer
         public abstract void Start(IPEndPoint localEndPoint);
         public abstract void Stop();
         public abstract void Send(SocketConnection connection, string message);
-        public abstract void Send(SocketConnection connection, byte[] messageData, int length);
+        public abstract void Send(SocketConnection connection, byte[] messageData, int length, bool rentFromPool = true);
         protected virtual byte[] GetMessageBytes(string message, out int length)
         {
             var body = message;
@@ -282,12 +284,12 @@ namespace Incubator.SocketServer
         {
             var length = 0;
             var bytes = GetMessageBytes(message, out length);
-            _sendingQueue.Add(new Package { Connection = connection, MessageData = bytes, DataLength = length });
+            _sendingQueue.Add(new Package { Connection = connection, MessageData = bytes, DataLength = length, RentFromPool = true });
         }
 
-        public override void Send(SocketConnection connection, byte[] messageData, int length)
+        public override void Send(SocketConnection connection, byte[] messageData, int length, bool rentFromPool = true)
         {
-            _sendingQueue.Add(new Package { Connection = connection, MessageData = messageData, DataLength = length });
+            _sendingQueue.Add(new Package { Connection = connection, MessageData = messageData, DataLength = length, RentFromPool = rentFromPool, NeedHead = true });
         }
 
         private void PorcessMessageQueue()
@@ -322,7 +324,7 @@ namespace Incubator.SocketServer
 
         public void MessageReceived(SocketConnection connection, byte[] messageData, int length)
         {
-            OnMessageReceived?.Invoke(this, new Package { Connection = connection, MessageData = messageData, DataLength = length });
+            OnMessageReceived?.Invoke(this, new Package { Connection = connection, MessageData = messageData, DataLength = length, RentFromPool = true });
         }
 
         protected override void Dispose(bool disposing)

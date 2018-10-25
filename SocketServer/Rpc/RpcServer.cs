@@ -1,9 +1,11 @@
 ﻿using Incubator.SocketServer.Rpc;
 using System;
+using System.Buffers;
 using System.Collections.Concurrent;
 using System.IO;
 using System.Net;
 using System.Reflection;
+using System.Text;
 
 namespace Incubator.SocketServer
 {
@@ -87,24 +89,22 @@ namespace Incubator.SocketServer
         private void On_MessageReceived(object sender, Package e)
         {
             using (MemoryStream stream = new MemoryStream(e.MessageData))
-            using (BinaryReader br = new BinaryReader(stream))
+            using (BinaryReader binReader = new BinaryReader(stream, Encoding.UTF8))
             {
-                var messageType = (MessageType)br.ReadInt32();
+                var messageType = (MessageType)binReader.ReadInt32();
                 switch (messageType)
                 {
                     case MessageType.SyncInterface:
-                        ProcessSync(null, null);
+                        ProcessSync(binReader, e);
                         break;
                     case MessageType.MethodInvocation:
-                        ProcessInvocation(null, null);
+                        ProcessInvocation(null, null, e);
                         break;
                 }
             }
-                var response = "go fuck yourself";
-            _listener.Send(e.Connection, response);
         }
 
-        private void ProcessSync(BinaryReader binReader, BinaryWriter binWriter)
+        private void ProcessSync(BinaryReader binReader, Package e)
         {
             var syncCat = "Sync";
             var serviceTypeName = binReader.ReadString();
@@ -118,20 +118,16 @@ namespace Incubator.SocketServer
                     syncCat = instance.InterfaceType.Name;
                     //Create a list of sync infos from the dictionary
                     var syncBytes = instance.ServiceSyncInfo.ToSerializedBytes();
-                    binWriter.Write(syncBytes.Length);
-                    binWriter.Write(syncBytes);
-                    
+                    _listener.Send(e.Connection, syncBytes, syncBytes.Length, false);
                 }
             }
             else
             {
-                //return zero to indicate type or version of type not found
-                binWriter.Write(0);
+                _listener.Send(e.Connection, BitConverter.GetBytes(0), 4, false);
             }
-            binWriter.Flush();
         }
 
-        private void ProcessInvocation(BinaryReader binReader, BinaryWriter binWriter)
+        private void ProcessInvocation(BinaryReader binReader, BinaryWriter binWriter, Package e)
         {
             //read service instance key
             var cat = "unknown";
