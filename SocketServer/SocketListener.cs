@@ -147,11 +147,11 @@ namespace Incubator.SocketServer
             _bufferSize = bufferSize;
             _maxConnectionCount = maxConnectionCount;
             _acceptedClientsSemaphore = new SemaphoreSlim(maxConnectionCount, maxConnectionCount);
-            Scheduler = new IOCompletionPortTaskScheduler(12, 12);
-            ConnectionList = new ConcurrentDictionary<int, SocketConnection>();
             _sendingQueue = new BlockingCollection<Package>();
             _sendMessageWorker = new Thread(PorcessMessageQueue);
             _shutdownEvent = new ManualResetEventSlim(false);
+            Scheduler = new IOCompletionPortTaskScheduler(12, 12);
+            ConnectionList = new ConcurrentDictionary<int, SocketConnection>();
 
             SocketAsyncSendEventArgsPool = new ObjectPool<IPooledWapper>(maxConnectionCount, 12, (pool) =>
             {
@@ -255,18 +255,17 @@ namespace Incubator.SocketServer
             {
                 Interlocked.Increment(ref _connectedCount);
                 connection = new SocketConnection(_connectedCount, e.AcceptSocket, this, _debug);
-                ConnectionList.TryAdd(_connectedCount, connection);
-                Interlocked.Increment(ref _connectedCount);
                 connection.Start();
+                ConnectionList.TryAdd(_connectedCount, connection);
                 OnConnectionCreated?.Invoke(this, new ConnectionInfo { Num = connection.Id, Description = string.Empty, Time = DateTime.Now });
             }
             catch (SocketException ex)
             {
-                Console.WriteLine(ex.Message);
+                Print(ex.Message);
             }
             catch (ConnectionAbortedException ex)
             {
-                Console.WriteLine(ex.Message);
+                Print(ex.Message);
                 connection.Close();
                 _acceptedClientsSemaphore.Release();
                 Interlocked.Decrement(ref _connectedCount);
@@ -274,7 +273,7 @@ namespace Incubator.SocketServer
             }
             catch (Exception ex)
             {
-                Console.WriteLine(ex.Message);
+                Print(ex.Message);
             }
 
             StartAccept(e);
