@@ -17,7 +17,7 @@ namespace Incubator.SocketClient.Rpc
 
         public static TInterface CreateProxy<TInterface>(Type channelType, Type ctorArgType, object channelCtorValue) where TInterface : class
         {
-            if (!channelType.InheritsFrom(typeof(IRpcCall))) throw new ArgumentException("channelType does not inherit from Channel");
+            //if (!channelType.InheritsFrom(typeof(IRpcCall))) throw new ArgumentException("channelType does not inherit from Channel");
             Type interfaceType = typeof(TInterface);
 
             //derive unique key for this dynamic assembly by interface, channel and ctor type names
@@ -168,7 +168,7 @@ namespace Incubator.SocketClient.Rpc
 
             int nofArgs = inputArgTypes.Length;
             //get the MethodInfo for InvokeMethod
-            MethodInfo invokeMethodMI = channelType.GetMethod(INVOKE_METHOD, BindingFlags.Instance | BindingFlags.NonPublic);
+            MethodInfo invokeMethodMI = channelType.GetMethod(INVOKE_METHOD, BindingFlags.Instance | BindingFlags.Public);
 
             //declare local variables
             LocalBuilder resultLB = mIL.DeclareLocal(typeof(object[])); // object[] result

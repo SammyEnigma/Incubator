@@ -17,6 +17,8 @@ Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "SocketServer", "SocketServe
 EndProject
 Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "SocketClient", "SocketClient\SocketClient.csproj", "{2ACFE1DB-FFEF-44BF-8790-11609B999ABA}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "RpcContract", "RpcContract\RpcContract.csproj", "{F5825C60-4FA8-4412-997C-CF6F0AAA7429}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -51,6 +53,10 @@ Global
 		{2ACFE1DB-FFEF-44BF-8790-11609B999ABA}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{2ACFE1DB-FFEF-44BF-8790-11609B999ABA}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{2ACFE1DB-FFEF-44BF-8790-11609B999ABA}.Release|Any CPU.Build.0 = Release|Any CPU
+		{F5825C60-4FA8-4412-997C-CF6F0AAA7429}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{F5825C60-4FA8-4412-997C-CF6F0AAA7429}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{F5825C60-4FA8-4412-997C-CF6F0AAA7429}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{F5825C60-4FA8-4412-997C-CF6F0AAA7429}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE

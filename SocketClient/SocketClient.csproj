@@ -10,6 +10,7 @@
   </ItemGroup>
 
   <ItemGroup>
+    <ProjectReference Include="..\RpcContract\RpcContract.csproj" />
     <ProjectReference Include="..\SocketServer\SocketServer.csproj" />
   </ItemGroup>
 

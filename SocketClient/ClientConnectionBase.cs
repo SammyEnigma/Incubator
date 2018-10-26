@@ -411,7 +411,9 @@ namespace Incubator.SocketClient
                 // 清理托管资源
                 _client.Dispose();
                 _readEventArgs.UserToken = null;
+                _readEventArgs.Completed -= IO_Completed;
                 _sendEventArgs.UserToken = null;
+                _sendEventArgs.Completed -= IO_Completed;
                 _readEventArgs.Dispose();
                 _sendEventArgs.Dispose();
             }

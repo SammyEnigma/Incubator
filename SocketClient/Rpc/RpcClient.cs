@@ -2,6 +2,7 @@
 using System;
 using System.Collections.Concurrent;
 using System.IO;
+using System.Net;
 using System.Text;
 
 namespace Incubator.SocketClient.Rpc
@@ -30,6 +31,7 @@ namespace Incubator.SocketClient.Rpc
         bool _debug;
         object _syncRoot;
         volatile int _received;
+        volatile int _synced;
         MemoryStream _stream;
         BinaryWriter _binWriter;
         ServiceSyncInfo _syncInfo;
@@ -39,44 +41,42 @@ namespace Incubator.SocketClient.Rpc
         // keep cached sync info to avoid redundant wire trips
         private static ConcurrentDictionary<Type, ServiceSyncInfo> _syncInfoCache = new ConcurrentDictionary<Type, ServiceSyncInfo>();
 
-        public RpcClient(string address, int port, bool debug)
+        public RpcClient(Type serviceType, IPEndPoint endPoint)
         {
-            _debug = debug;
+            _debug = false;
             _syncRoot = new object();
             _stream = new MemoryStream();
             _binWriter = new BinaryWriter(_stream, Encoding.UTF8);
             _parameterTransferHelper = new ParameterTransferHelper();
-            _connectionPool = new ObjectPool<IPooledWapper>(12, 4, pool => new RpcConnection(pool, address, port, 256, _debug));
-        }
-
-        class SyncInterfaceInfo
-        {
-            public int MessageType;
-            // SyncInterface
-            public string FullName;
-            // MethodInvocation
-            public int ServiceKeyIndex;
-            public int MethodIdent;
+            _connectionPool = new ObjectPool<IPooledWapper>(12, 4, pool => new RpcConnection(pool, endPoint.Address.ToString(), endPoint.Port, 256, _debug));
+            SyncInterface(serviceType);
         }
 
         public void SyncInterface(Type serviceType)
         {
             if (!_syncInfoCache.TryGetValue(serviceType, out _syncInfo))
             {
-                using (var conn = ((RpcConnection)_connectionPool.Get()))
+                var conn = ((RpcConnection)_connectionPool.Get());
+                conn.OnMessageReceived += (sender, e) =>
                 {
-                    conn.OnMessageReceived += (sender, e) =>
-                    {
-                        _binWriter.Seek(0, SeekOrigin.Begin);
-                        _stream.Seek(0, SeekOrigin.Begin);
+                    _binWriter.Seek(0, SeekOrigin.Begin);
+                    _stream.Seek(0, SeekOrigin.Begin);
 
-                        _syncInfo = e.MessageData.ToDeserializedObject<ServiceSyncInfo>();
-                        _syncInfoCache.AddOrUpdate(serviceType, _syncInfo, (t, info) => _syncInfo);
-                    };
-                    conn.Connect();
-                    _binWriter.Write((int)MessageType.SyncInterface);
-                    _binWriter.Write(serviceType.FullName);
-                    conn.Send(_stream.GetBuffer(), (int)_stream.Position, false);
+                    _syncInfo = e.MessageData.ToDeserializedObject<ServiceSyncInfo>();
+                    _syncInfoCache.AddOrUpdate(serviceType, _syncInfo, (t, info) => _syncInfo);
+                    ((IDisposable)sender).Dispose();
+                    System.Threading.Interlocked.Exchange(ref _synced, 1);
+                };
+                conn.Connect();
+                _binWriter.Write((int)MessageType.SyncInterface);
+                _binWriter.Write(serviceType.FullName);
+                conn.Send(_stream.GetBuffer(), (int)_stream.Position, false);
+                // todo: rpcclient继承了clientbase的异步方式，而rpc调用天然需要同步方式
+                // 后期考虑重构掉这种丑陋的异步模拟同步的方式
+                System.Threading.SpinWait spinner = new System.Threading.SpinWait();
+                while (_synced == 0)
+                {
+                    spinner.SpinOnce();
                 }
             }
         }
@@ -120,44 +120,42 @@ namespace Incubator.SocketClient.Rpc
                 if (ident < 0)
                     throw new Exception(string.Format("Cannot match method '{0}' to its server side equivalent", mdata[0]));
 
-                using (var conn = ((RpcConnection)_connectionPool.Get()))
+                var conn = ((RpcConnection)_connectionPool.Get());
+                conn.OnMessageReceived += (sender, e) =>
                 {
-                    conn.OnMessageReceived += (sender, e) =>
-                    {
-                        _binWriter.Seek(0, SeekOrigin.Begin);
-                        _stream.Seek(0, SeekOrigin.Begin);
+                    _binWriter.Seek(0, SeekOrigin.Begin);
+                    _stream.Seek(0, SeekOrigin.Begin);
 
-                        using (MemoryStream stream = new MemoryStream(e.MessageData))
-                        using (BinaryReader br = new BinaryReader(stream))
-                        {
+                    using (MemoryStream stream = new MemoryStream(e.MessageData))
+                    using (BinaryReader br = new BinaryReader(stream))
+                    {
                             // Read the result of the invocation.
                             MessageType messageType = (MessageType)br.ReadInt32();
-                            if (messageType == MessageType.UnknownMethod)
-                                throw new Exception("Unknown method.");
+                        if (messageType == MessageType.UnknownMethod)
+                            throw new Exception("Unknown method.");
 
-                            outParams = _parameterTransferHelper.ReceiveParameters(br);
+                        outParams = _parameterTransferHelper.ReceiveParameters(br);
 
-                            if (messageType == MessageType.ThrowException)
-                                throw (Exception)outParams[0];
+                        if (messageType == MessageType.ThrowException)
+                            throw (Exception)outParams[0];
 
-                            System.Threading.Interlocked.Exchange(ref _received, 1);
-                        }
-                    };
-                    conn.Connect();
-                    // write the message type
-                    _binWriter.Write((int)MessageType.MethodInvocation);
-                    // write service key index
-                    _binWriter.Write(_syncInfo.ServiceKeyIndex);
-                    // write the method ident to the server
-                    _binWriter.Write(ident);
-                    // send the parameters
-                    _parameterTransferHelper.SendParameters(_syncInfo.UseCompression,
-                        _syncInfo.CompressionThreshold,
-                        _binWriter,
-                        parameters);
+                        System.Threading.Interlocked.Exchange(ref _received, 1);
+                    }
+                };
+                conn.Connect();
+                // write the message type
+                _binWriter.Write((int)MessageType.MethodInvocation);
+                // write service key index
+                _binWriter.Write(_syncInfo.ServiceKeyIndex);
+                // write the method ident to the server
+                _binWriter.Write(ident);
+                // send the parameters
+                _parameterTransferHelper.SendParameters(_syncInfo.UseCompression,
+                    _syncInfo.CompressionThreshold,
+                    _binWriter,
+                    parameters);
 
-                    conn.Send(_stream.GetBuffer(), (int)_stream.Position, false);
-                }
+                conn.Send(_stream.GetBuffer(), (int)_stream.Position, false);
 
                 // todo: rpcclient继承了clientbase的异步方式，而rpc调用天然需要同步方式
                 // 后期考虑重构掉这种丑陋的异步模拟同步的方式

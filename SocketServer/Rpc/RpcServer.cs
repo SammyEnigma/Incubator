@@ -11,7 +11,7 @@ namespace Incubator.SocketServer
 {
     public class RpcServer
     {
-        int _bufferSize = 256;
+        int _bufferSize = 512;
         int _maxConnectionCount = 500;
         int _compressionThreshold = 131072; //128KB
         bool _useCompression = false; //default is false
@@ -202,7 +202,6 @@ namespace Incubator.SocketServer
 
         private void ProcessSync(BinaryReader binReader, Package e)
         {
-            var syncCat = "Sync";
             var serviceTypeName = binReader.ReadString();
 
             int serviceKey;
@@ -211,7 +210,6 @@ namespace Incubator.SocketServer
                 ServiceInstance instance;
                 if (_services.TryGetValue(serviceKey, out instance))
                 {
-                    syncCat = instance.InterfaceType.Name;
                     //Create a list of sync infos from the dictionary
                     var syncBytes = instance.ServiceSyncInfo.ToSerializedBytes();
                     _listener.Send(e.Connection, syncBytes, syncBytes.Length, false);
