@@ -35,6 +35,8 @@ namespace Incubator.SocketServer
         SocketAwaitable _readAwait;
         SocketAwaitable _sendAwait;
 
+        int _position;
+
         ParseEnum _parseStatus;
         byte[] headBuffer = null;
         byte[] bodyBuffer = null;
@@ -69,6 +71,7 @@ namespace Incubator.SocketServer
             _sendbuffer = _sendEventArgs.Buffer;
             _readAwait = new SocketAwaitable(_readEventArgs);
             _sendAwait = new SocketAwaitable(_sendEventArgs);
+            _position = 0;
         }
 
         ~StreamedConnection()
@@ -77,17 +80,13 @@ namespace Incubator.SocketServer
             Dispose(false);
         }
 
-        public void Start()
+        public async Task Start()
         {
-            Task.Factory.StartNew(() =>
+            var op = await ReadInt32();
+            switch (op)
             {
-                Print("当前线程id：" + Thread.CurrentThread.ManagedThreadId);
-                Interlocked.CompareExchange(ref _execStatus, STARTED, NOT_STARTED);
-
-            },
-            CancellationToken.None,
-            TaskCreationOptions.None,
-            _socketListener.Scheduler);
+                case 1:; break;
+            }
         }
 
         public void Close()
@@ -143,6 +142,7 @@ namespace Incubator.SocketServer
                 }
             }
             while ((read += _readEventArgs.BytesTransferred) < count);
+            _position = read;
         }
 
         public async Task<int> ReadInt32()
@@ -151,9 +151,17 @@ namespace Incubator.SocketServer
             return (int)(_readbuffer[0] | _readbuffer[1] << 8 | _readbuffer[2] << 16 | _readbuffer[3] << 24);
         }
 
-        public void Write(byte[] buffer, int offset, int count)
+        public async Task<ArraySegment<byte>> ReadBytes(int count)
         {
-            throw new NotImplementedException();
+            await FillBuffer(count);
+            return new ArraySegment<byte>(_readbuffer, _position, count);
+        }
+
+        public async Task Write(int offset, int count)
+        {
+            _sendEventArgs.SetBuffer(offset, count);
+            await _socket.SendAsync(_sendAwait);
+            // 
         }
 
         public void Dispose()
