@@ -9,7 +9,7 @@ using System.Text;
 
 namespace Incubator.SocketServer
 {
-    public class RpcServer
+    public class RpcServer 
     {
         int _bufferSize = 512;
         int _maxConnectionCount = 500;
