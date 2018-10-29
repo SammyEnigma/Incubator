@@ -1,5 +1,9 @@
-﻿using System;
+﻿using Incubator.SocketServer.Rpc;
+using System;
+using System.Buffers;
+using System.Collections.Concurrent;
 using System.Net.Sockets;
+using System.Reflection;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -7,14 +11,6 @@ namespace Incubator.SocketServer
 {
     public class StreamedConnection : IConnection, IDisposable
     {
-        private enum ParseEnum
-        {
-            Received = 1,
-            Process_Head = 2,
-            Process_Body = 3,
-            Find_Body = 4
-        }
-
         const int NOT_STARTED = 1;
         const int STARTED = 2;
         const int SHUTTING_DOWN = 3;
@@ -27,6 +23,7 @@ namespace Incubator.SocketServer
         Socket _socket;
         byte[] _readbuffer;
         byte[] _sendbuffer;
+        byte[] _largebuffer;
         BaseListener _socketListener;
         PooledSocketAsyncEventArgs _pooledReadEventArgs;
         PooledSocketAsyncEventArgs _pooledSendEventArgs;
@@ -34,22 +31,11 @@ namespace Incubator.SocketServer
         SocketAsyncEventArgs _sendEventArgs;
         SocketAwaitable _readAwait;
         SocketAwaitable _sendAwait;
-
         int _position;
 
-        ParseEnum _parseStatus;
-        byte[] headBuffer = null;
-        byte[] bodyBuffer = null;
-        int maxMessageLength = 512;
-        int headLength = 4;
-
-        int offset = 0;
-        int messageLength = 0;
-        int prefixBytesDoneCount = 0;
-        int prefixBytesDoneThisOp = 0;
-        int messageBytesDoneCount = 0;
-        int messageBytesDoneThisOp = 0;
-        int remainingBytesToProcess = 0;
+        ConcurrentDictionary<string, int> _serviceKeys;
+        ConcurrentDictionary<int, ServiceInstance> _services;
+        ParameterTransferHelper _parameterTransferHelper;
 
         internal int Id { get { return _id; } }
 
@@ -59,7 +45,6 @@ namespace Incubator.SocketServer
             _debug = debug;
             _execStatus = NOT_STARTED;
             _socketListener = listener;
-            _parseStatus = ParseEnum.Received;
             _socket = socket;
             _pooledReadEventArgs = _socketListener.SocketAsyncReceiveEventArgsPool.Get() as PooledSocketAsyncEventArgs;
             _readEventArgs = _pooledReadEventArgs.SocketAsyncEvent;
@@ -72,6 +57,10 @@ namespace Incubator.SocketServer
             _readAwait = new SocketAwaitable(_readEventArgs);
             _sendAwait = new SocketAwaitable(_sendEventArgs);
             _position = 0;
+
+            _serviceKeys = new ConcurrentDictionary<string, int>();
+            _services = new ConcurrentDictionary<int, ServiceInstance>();
+            _parameterTransferHelper = new ParameterTransferHelper();
         }
 
         ~StreamedConnection()
@@ -82,11 +71,116 @@ namespace Incubator.SocketServer
 
         public async Task Start()
         {
-            var op = await ReadInt32();
-            switch (op)
+            var messageType = (MessageType)await ReadInt32();
+            switch (messageType)
             {
-                case 1:; break;
+                case MessageType.SyncInterface:
+                    await ProcessSync();
+                    break;
+                case MessageType.MethodInvocation:
+                    await ProcessInvocation();
+                    break;
             }
+        }
+
+        private async Task ProcessSync()
+        {
+            var serviceTypeName = "";
+
+            int serviceKey;
+            if (_serviceKeys.TryGetValue(serviceTypeName, out serviceKey))
+            {
+                ServiceInstance instance;
+                if (_services.TryGetValue(serviceKey, out instance))
+                {
+                    //Create a list of sync infos from the dictionary
+                    var syncBytes = instance.ServiceSyncInfo.ToSerializedBytes();
+                    await Write(syncBytes, 0, syncBytes.Length, false);
+                }
+            }
+            else
+            {
+                await Write(0);
+            }
+        }
+
+        class InvokeInfo
+        {
+            public ServiceInstance InvokedInstance;
+            public int MethodHashCode;
+            public object[] Parameters;
+        }
+
+        class InvokeReturn
+        {
+            public int ReturnMessageType;
+            public object[] ReturnParameters;
+        }
+
+        private async Task ProcessInvocation()
+        {
+            //read service instance key
+            var cat = "unknown";
+            var stat = "MethodInvocation";
+            var invokedServiceKey = await ReadInt32();
+            var body = await ReadBytes(invokedServiceKey);
+            var obj = body.Array.ToDeserializedObject<InvokeInfo>();
+
+            ServiceInstance invokedInstance;
+            if (_services.TryGetValue(invokedServiceKey, out invokedInstance))
+            {
+                cat = invokedInstance.InterfaceType.Name;
+                //read the method identifier
+                //int methodHashCode = await ReadInt32();
+                int methodHashCode = obj.MethodHashCode;
+                if (invokedInstance.InterfaceMethods.ContainsKey(methodHashCode))
+                {
+                    MethodInfo method;
+                    invokedInstance.InterfaceMethods.TryGetValue(methodHashCode, out method);
+                    stat = method.Name;
+
+                    bool[] isByRef;
+                    invokedInstance.MethodParametersByRef.TryGetValue(methodHashCode, out isByRef);
+
+                    //read parameter data
+                    //object[] parameters = _parameterTransferHelper.ReceiveParameters(binReader);
+                    object[] parameters = obj.Parameters;
+
+                    //invoke the method
+                    object[] returnParameters;
+                    var returnMessageType = MessageType.ReturnValues;
+                    try
+                    {
+                        object returnValue = method.Invoke(invokedInstance.SingletonInstance, parameters);
+                        //the result to the client is the return value (null if void) and the input parameters
+                        returnParameters = new object[1 + parameters.Length];
+                        returnParameters[0] = returnValue;
+                        for (int i = 0; i < parameters.Length; i++)
+                            returnParameters[i + 1] = isByRef[i] ? parameters[i] : null;
+                    }
+                    catch (Exception ex)
+                    {
+                        //an exception was caught. Rethrow it client side
+                        returnParameters = new object[] { ex };
+                        returnMessageType = MessageType.ThrowException;
+                    }
+
+                    var returnObj = new InvokeReturn
+                    {
+                        ReturnMessageType = (int)returnMessageType,
+                        ReturnParameters = returnParameters
+                    };
+                    //send the result back to the client
+                    // (1) write the message type
+                    // (2) write the return parameters
+                    var retBytes = returnObj.ToSerializedBytes();
+                    await Write(retBytes, 0, retBytes.Length, false);
+                }
+                else
+                    await Write((int)MessageType.UnknownMethod);
+            }
+            else
+                await Write((int)MessageType.UnknownMethod);
         }
 
         public void Close()
@@ -120,14 +214,6 @@ namespace Incubator.SocketServer
             throw new ConnectionAbortedException(reason);
         }
 
-        private void Print(string message)
-        {
-            if (_debug)
-            {
-                Console.WriteLine(message);
-            }
-        }
-
         private async Task FillBuffer(int count)
         {
             var read = 0;
@@ -145,6 +231,33 @@ namespace Incubator.SocketServer
             _position = read;
         }
 
+        private async Task FillLargeBuffer(int count)
+        {
+            var read = 0;
+            ReleaseLargeBuffer();
+            _largebuffer = ArrayPool<byte>.Shared.Rent(count);
+            do
+            {
+                await _socket.ReceiveAsync(_readAwait);
+                if (_readEventArgs.BytesTransferred == 0)
+                {
+                    // FIN here
+                    break;
+                }
+                Buffer.BlockCopy(_readEventArgs.Buffer, 0, _largebuffer, read, _readEventArgs.BytesTransferred);
+            }
+            while ((read += _readEventArgs.BytesTransferred) < count);
+        }
+
+        private void ReleaseLargeBuffer()
+        {
+            if (_largebuffer != null)
+            {
+                ArrayPool<byte>.Shared.Return(_largebuffer, true);
+                _largebuffer = null;
+            }
+        }
+
         public async Task<int> ReadInt32()
         {
             await FillBuffer(4);
@@ -153,15 +266,134 @@ namespace Incubator.SocketServer
 
         public async Task<ArraySegment<byte>> ReadBytes(int count)
         {
-            await FillBuffer(count);
-            return new ArraySegment<byte>(_readbuffer, _position, count);
+            if (count > _socketListener.BufferSize)
+            {
+                await FillLargeBuffer(count);
+                return _largebuffer;
+            }
+            else
+            {
+                await FillBuffer(count);
+                return new ArraySegment<byte>(_readbuffer, _position, count);
+            }
         }
 
-        public async Task Write(int offset, int count)
+        public async Task Write(byte[] buffer, int offset, int count, bool rentFromPool)
         {
-            _sendEventArgs.SetBuffer(offset, count);
+            if (count > _socketListener.BufferSize)
+            {
+                var remain = count;
+                while (remain > 0)
+                {
+                    _sendEventArgs.SetBuffer(offset, remain);
+                    Buffer.BlockCopy(buffer, 0, _sendEventArgs.Buffer, offset, count);
+                    await _socket.SendAsync(_sendAwait);
+                }
+            }
+            else
+            {
+
+            }
+
+            if (rentFromPool)
+            {
+                ArrayPool<byte>.Shared.Return(buffer, true);
+            }
+        }
+
+        public async Task Write(bool value)
+        {
+            _sendEventArgs.SetBuffer(0, 1);
+            _sendEventArgs.Buffer[0] = (byte)(value ? 1 : 0);
             await _socket.SendAsync(_sendAwait);
-            // 
+        }
+
+        public async Task Write(byte value)
+        {
+            _sendEventArgs.SetBuffer(0, 1);
+            _sendEventArgs.Buffer[0] = value;
+            await _socket.SendAsync(_sendAwait);
+        }
+
+        private unsafe void UnsafeDoubleBytes(double value)
+        {
+            ulong TmpValue = *(ulong*)&value;
+            _sendEventArgs.Buffer[0] = (byte)TmpValue;
+            _sendEventArgs.Buffer[1] = (byte)(TmpValue >> 8);
+            _sendEventArgs.Buffer[2] = (byte)(TmpValue >> 16);
+            _sendEventArgs.Buffer[3] = (byte)(TmpValue >> 24);
+            _sendEventArgs.Buffer[4] = (byte)(TmpValue >> 32);
+            _sendEventArgs.Buffer[5] = (byte)(TmpValue >> 40);
+            _sendEventArgs.Buffer[6] = (byte)(TmpValue >> 48);
+            _sendEventArgs.Buffer[7] = (byte)(TmpValue >> 56);
+        }
+
+        public async Task Write(double value)
+        {
+            _sendEventArgs.SetBuffer(0, 8);
+            UnsafeDoubleBytes(value);
+            await _socket.SendAsync(_sendAwait);
+        }
+
+        public async Task Write(short value)
+        {
+            _sendEventArgs.SetBuffer(0, 2);
+            _sendEventArgs.Buffer[0] = (byte)value;
+            _sendEventArgs.Buffer[1] = (byte)(value >> 8);
+            await _socket.SendAsync(_sendAwait);
+        }
+
+        public async Task Write(int value)
+        {
+            _sendEventArgs.SetBuffer(0, 4);
+            _sendEventArgs.Buffer[0] = (byte)value;
+            _sendEventArgs.Buffer[1] = (byte)(value >> 8);
+            _sendEventArgs.Buffer[2] = (byte)(value >> 16);
+            _sendEventArgs.Buffer[3] = (byte)(value >> 24);
+            await _socket.SendAsync(_sendAwait);
+        }
+
+        public async Task Write(long value)
+        {
+            _sendEventArgs.SetBuffer(0, 8);
+            _sendEventArgs.Buffer[0] = (byte)value;
+            _sendEventArgs.Buffer[1] = (byte)(value >> 8);
+            _sendEventArgs.Buffer[2] = (byte)(value >> 16);
+            _sendEventArgs.Buffer[3] = (byte)(value >> 24);
+            _sendEventArgs.Buffer[4] = (byte)(value >> 32);
+            _sendEventArgs.Buffer[5] = (byte)(value >> 40);
+            _sendEventArgs.Buffer[6] = (byte)(value >> 48);
+            _sendEventArgs.Buffer[7] = (byte)(value >> 56);
+            await _socket.SendAsync(_sendAwait);
+        }
+
+        private unsafe void UnsafeFloatBytes(float value)
+        {
+            uint TmpValue = *(uint*)&value;
+            _sendEventArgs.Buffer[0] = (byte)TmpValue;
+            _sendEventArgs.Buffer[1] = (byte)(TmpValue >> 8);
+            _sendEventArgs.Buffer[2] = (byte)(TmpValue >> 16);
+            _sendEventArgs.Buffer[3] = (byte)(TmpValue >> 24);
+        }
+
+        public async Task Write(float value)
+        {
+            _sendEventArgs.SetBuffer(0, 1);
+            UnsafeFloatBytes(value);
+            await _socket.SendAsync(_sendAwait);
+        }
+
+        public async Task Write(decimal value)
+        {
+            throw new NotImplementedException();
+        }
+
+        private void Print(string message)
+        {
+            if (_debug)
+            {
+                Console.WriteLine(message);
+            }
         }
 
         public void Dispose()
