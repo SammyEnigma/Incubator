@@ -126,7 +126,7 @@ namespace Incubator.SocketServer
         }
     }
 
-    public class SocketListener : BaseListener, IConnectionEvents, IInnerCallBack, IDisposable
+    public class SocketListener : BaseListener, IConnectionEvents, IInnerCallBack
     {
         private int _maxConnectionCount;
         private volatile int _connectedCount;

@@ -3,7 +3,7 @@ using System.Net.Sockets;
 
 namespace Incubator.SocketServer
 {
-    internal sealed class PooledSocketAsyncEventArgs : IPooledWapper
+    public sealed class PooledSocketAsyncEventArgs : IPooledWapper
     {
         private bool _disposed;
         private SocketAsyncEventArgs _socketAsyncEvent;
