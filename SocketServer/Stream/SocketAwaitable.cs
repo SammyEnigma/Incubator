@@ -25,6 +25,12 @@ namespace Incubator.SocketServer
         internal Action m_continuation;
         internal SocketAsyncEventArgs m_eventArgs;
 
+        
+        public SocketAwaitable(SocketAsyncEventArgs eventArgs, bool debug = false)
+            : this(eventArgs, null, debug)
+        { }
+
+        // todo: listener在这里携带的信息更多想要表达一种线程模型，后期考虑专门抽象一个类型
         public SocketAwaitable(SocketAsyncEventArgs eventArgs, BaseListener listener, bool debug = false)
         {
             if (eventArgs == null)
@@ -76,13 +82,20 @@ namespace Incubator.SocketServer
                     ref m_continuation, SENTINEL, null);
             if (prev != null)
             {
-                Task.Factory.StartNew(() =>
+                if (_listener == null)
                 {
                     prev();
-                },
-                CancellationToken.None,
-                TaskCreationOptions.None,
-                _listener.Scheduler);
+                }
+                else
+                {
+                    Task.Factory.StartNew(() =>
+                    {
+                        prev();
+                    },
+                    CancellationToken.None,
+                    TaskCreationOptions.None,
+                    _listener.Scheduler);
+                }
             }
         }
 

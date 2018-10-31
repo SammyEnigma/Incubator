@@ -26,7 +26,7 @@ namespace Incubator.SocketClient.Rpc
         void SyncInterface(Type serviceType);
     }
 
-    public class RpcClient : IRpcCall
+    public class RpcClient
     {
         bool _debug;
         object _syncRoot;
