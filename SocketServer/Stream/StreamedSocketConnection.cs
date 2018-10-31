@@ -24,8 +24,8 @@ namespace Incubator.SocketServer
             _pooledSendEventArgs = _socketListener.SocketAsyncSendEventArgsPool.Get() as PooledSocketAsyncEventArgs;
             _sendEventArgs = _pooledSendEventArgs.SocketAsyncEvent;
 
-            _readAwait = new SocketAwaitable(_readEventArgs);
-            _sendAwait = new SocketAwaitable(_sendEventArgs);
+            _readAwait = new SocketAwaitable(_readEventArgs, listener);
+            _sendAwait = new SocketAwaitable(_sendEventArgs, listener);
         }
 
         ~StreamedSocketConnection()
@@ -44,6 +44,7 @@ namespace Incubator.SocketServer
                 if (_readEventArgs.BytesTransferred == 0)
                 {
                     // FIN here
+                    // todo: 添加处理逻辑
                     break;
                 }
             }
@@ -100,19 +101,14 @@ namespace Incubator.SocketServer
 
         public async Task Write(byte[] buffer, int offset, int count, bool rentFromPool)
         {
-            if (count > _socketListener.BufferSize)
+            var sent = 0;
+            var remain = count;
+            while (remain > 0)
             {
-                var remain = count;
-                while (remain > 0)
-                {
-                    _sendEventArgs.SetBuffer(offset, remain);
-                    Buffer.BlockCopy(buffer, 0, _sendEventArgs.Buffer, offset, count);
-                    await _socket.SendAsync(_sendAwait);
-                }
-            }
-            else
-            {
-
+                Buffer.BlockCopy(buffer, offset + sent, _sendEventArgs.Buffer, 0, remain > _sendEventArgs.Buffer.Length ? _sendEventArgs.Buffer.Length : remain);
+                await _socket.SendAsync(_sendAwait);
+                sent += _sendEventArgs.BytesTransferred;
+                remain -= _sendEventArgs.BytesTransferred;
             }
 
             if (rentFromPool)

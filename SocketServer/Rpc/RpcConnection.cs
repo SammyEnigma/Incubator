@@ -10,7 +10,7 @@ namespace Incubator.SocketServer.Rpc
     {
         class InvokeInfo
         {
-            public ServiceInstance InvokedInstance;
+            public int InvokedServiceKey;
             public int MethodHashCode;
             public object[] Parameters;
         }
@@ -35,23 +35,25 @@ namespace Incubator.SocketServer.Rpc
 
         protected override async void InnerStart()
         {
-            var messageType = (MessageType)await ReadInt32();
-            switch (messageType)
+            while (true)
             {
-                case MessageType.SyncInterface:
-                    await ProcessSync();
-                    break;
-                case MessageType.MethodInvocation:
-                    await ProcessInvocation();
-                    break;
+                var messageType = (MessageType)await ReadInt32();
+                switch (messageType)
+                {
+                    case MessageType.SyncInterface:
+                        await ProcessSync();
+                        break;
+                    case MessageType.MethodInvocation:
+                        await ProcessInvocation();
+                        break;
+                }
             }
         }
 
         private async Task ProcessSync()
         {
-            var serviceTypeName = "";
-
-            int serviceKey;
+            var serviceKey = 0;
+            var serviceTypeName = string.Empty;
             if (_serviceKeys.TryGetValue(serviceTypeName, out serviceKey))
             {
                 ServiceInstance instance;
@@ -73,16 +75,15 @@ namespace Incubator.SocketServer.Rpc
             //read service instance key
             var cat = "unknown";
             var stat = "MethodInvocation";
-            var invokedServiceKey = await ReadInt32();
-            var body = await ReadBytes(invokedServiceKey);
+            var body_length = await ReadInt32();
+            var body = await ReadBytes(body_length);
             var obj = body.Array.ToDeserializedObject<InvokeInfo>();
 
             ServiceInstance invokedInstance;
-            if (_services.TryGetValue(invokedServiceKey, out invokedInstance))
+            if (_services.TryGetValue(obj.InvokedServiceKey, out invokedInstance))
             {
                 cat = invokedInstance.InterfaceType.Name;
                 //read the method identifier
-                //int methodHashCode = await ReadInt32();
                 int methodHashCode = obj.MethodHashCode;
                 if (invokedInstance.InterfaceMethods.ContainsKey(methodHashCode))
                 {
@@ -94,7 +95,6 @@ namespace Incubator.SocketServer.Rpc
                     invokedInstance.MethodParametersByRef.TryGetValue(methodHashCode, out isByRef);
 
                     //read parameter data
-                    //object[] parameters = _parameterTransferHelper.ReceiveParameters(binReader);
                     object[] parameters = obj.Parameters;
 
                     //invoke the method
