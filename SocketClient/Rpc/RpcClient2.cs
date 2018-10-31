@@ -36,6 +36,7 @@ namespace Incubator.SocketClient.Rpc
             _syncRoot = new object();
             _parameterTransferHelper = new ParameterTransferHelper();
             _connectionPool = new ObjectPool<IPooledWapper>(12, 4, pool => new RpcConnection2(pool, endPoint.Address.ToString(), endPoint.Port, 256, _debug));
+            SyncInterface(serviceType).Wait();
         }
 
         public async Task SyncInterface(Type serviceType)
