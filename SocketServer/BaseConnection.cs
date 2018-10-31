@@ -26,17 +26,18 @@ namespace Incubator.SocketServer
         }
     }
 
-    public abstract class ConnectionBase : IConnection, IDisposable
+    public abstract class BaseConnection : IConnection, IDisposable
     {
+        int _id;
+        bool _debug;
+        bool _disposed;
+
         protected const int NOT_STARTED = 1;
         protected const int STARTED = 2;
         protected const int SHUTTING_DOWN = 3;
         protected const int SHUTDOWN = 4;
         protected volatile int _execStatus;
 
-        int _id;
-        bool _debug;
-        bool _disposed;
         protected Socket _socket;
         protected BaseListener _socketListener;
         protected SocketAsyncEventArgs _readEventArgs;
@@ -46,16 +47,17 @@ namespace Incubator.SocketServer
 
         internal int Id { get { return _id; } }
 
-        public ConnectionBase(int id, Socket socket, BaseListener listener, bool debug)
+        public BaseConnection(int id, Socket socket, BaseListener listener, bool debug = false)
         {
             _id = id;
             _debug = debug;
+            _disposed = false;
             _execStatus = NOT_STARTED;
             _socketListener = listener;
             _socket = socket;
         }
 
-        ~ConnectionBase()
+        ~BaseConnection()
         {
             //必须为false
             Dispose(false);

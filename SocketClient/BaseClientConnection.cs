@@ -9,7 +9,7 @@ using System.Threading.Tasks;
 
 namespace Incubator.SocketClient
 {
-    public class ClientConnectionBase : IDisposable
+    public class BaseClientConnection : IDisposable
     {
         private enum ParseEnum
         {
@@ -42,7 +42,7 @@ namespace Incubator.SocketClient
         int messageBytesDoneThisOp = 0;
         int remainingBytesToProcess = 0;
 
-        public ClientConnectionBase(string address, int port, int bufferSize, bool debug = false)
+        public BaseClientConnection(string address, int port, int bufferSize, bool debug = false)
         {
             _debug = debug;
             _disposed = false;
@@ -61,9 +61,8 @@ namespace Incubator.SocketClient
             _sendEventArgs.SetBuffer(ArrayPool<byte>.Shared.Rent(_bufferSize), 0, _bufferSize);
         }
 
-        ~ClientConnectionBase()
+        ~BaseClientConnection()
         {
-            //必须为false
             Dispose(false);
         }
 

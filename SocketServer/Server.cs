@@ -6,13 +6,15 @@ namespace Incubator.SocketServer
 {
     public class Server
     {
-        IPEndPoint _endPoint;
-        BaseListener _listener;
         int _bufferSize = 256;
         int _maxConnectionCount = 500;
+        bool _debug;
+        IPEndPoint _endPoint;
+        SocketListener _listener;
 
-        public Server(string address, int port)
+        public Server(string address, int port, bool debug = false)
         {
+            _debug = debug;
             _listener = new SocketListener(_maxConnectionCount, _bufferSize);
             _endPoint = new IPEndPoint(IPAddress.Parse(address), port);
             Init();

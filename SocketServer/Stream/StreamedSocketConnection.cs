@@ -5,18 +5,20 @@ using System.Threading.Tasks;
 
 namespace Incubator.SocketServer
 {
-    public abstract class StreamedSocketConnection : ConnectionBase
+    public abstract class StreamedSocketConnection : BaseConnection
     {
-        int _id;
-        int _position;
+        bool _debug;
         bool _disposed;
+        int _position;
         byte[] _largebuffer;
         SocketAwaitable _readAwait;
         SocketAwaitable _sendAwait;
 
-        public StreamedSocketConnection(int id, Socket socket, BaseListener listener, bool debug)
+        public StreamedSocketConnection(int id, Socket socket, BaseListener listener, bool debug = false)
             : base(id, socket, listener, debug)
         {
+            _debug = debug;
+            _disposed = false;
             _position = 0;
             _pooledReadEventArgs = _socketListener.SocketAsyncReceiveEventArgsPool.Get() as PooledSocketAsyncEventArgs;
             _readEventArgs = _pooledReadEventArgs.SocketAsyncEvent;
@@ -24,13 +26,12 @@ namespace Incubator.SocketServer
             _pooledSendEventArgs = _socketListener.SocketAsyncSendEventArgsPool.Get() as PooledSocketAsyncEventArgs;
             _sendEventArgs = _pooledSendEventArgs.SocketAsyncEvent;
 
-            _readAwait = new SocketAwaitable(_readEventArgs, listener);
-            _sendAwait = new SocketAwaitable(_sendEventArgs, listener);
+            _readAwait = new SocketAwaitable(_readEventArgs, listener, _debug);
+            _sendAwait = new SocketAwaitable(_sendEventArgs, listener, _debug);
         }
 
         ~StreamedSocketConnection()
         {
-            //必须为false
             Dispose(false);
         }
 
@@ -87,7 +88,7 @@ namespace Incubator.SocketServer
 
         public async Task<ArraySegment<byte>> ReadBytes(int count)
         {
-            if (count > _socketListener.BufferSize)
+            if (count > _readEventArgs.Buffer.Length)
             {
                 await FillLargeBuffer(count);
                 return _largebuffer;
@@ -213,8 +214,8 @@ namespace Incubator.SocketServer
             if (disposing)
             {
                 // 清理托管资源
-                _sendEventArgs.UserToken = null;
-                _readEventArgs.UserToken = null;
+                _readAwait.Dispose();
+                _sendAwait.Dispose();
             }
 
             // 清理非托管资源

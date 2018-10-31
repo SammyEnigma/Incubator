@@ -6,7 +6,7 @@ using System.Threading.Tasks;
 
 namespace Incubator.SocketServer
 {
-    public sealed class SocketConnection : ConnectionBase
+    public sealed class SocketConnection : BaseConnection
     {
         class FixHeaderDecoder
         {
@@ -34,9 +34,9 @@ namespace Incubator.SocketServer
             int remainingBytesToProcess = 0;
             SocketConnection _connection;
 
-            public FixHeaderDecoder(SocketConnection connection)
+            public FixHeaderDecoder(SocketConnection connection, bool debug = false)
             {
-                _debug = false;
+                _debug = debug;
                 _parseStatus = ParseEnum.Received;
                 _connection = connection;
             }
@@ -216,13 +216,16 @@ namespace Incubator.SocketServer
             }
         }
 
+        bool _debug;
         bool _disposed;
         FixHeaderDecoder _decoder;
 
-        public SocketConnection(int id, Socket socket, BaseListener listener, bool debug) 
+        public SocketConnection(int id, Socket socket, BaseListener listener, bool debug = false) 
             : base(id, socket, listener, debug)
         {
-            _decoder = new FixHeaderDecoder(this);
+            _debug = debug;
+            _disposed = false;
+            _decoder = new FixHeaderDecoder(this, _debug);
 
             _pooledReadEventArgs = _socketListener.SocketAsyncReceiveEventArgsPool.Get() as PooledSocketAsyncEventArgs;
             _readEventArgs = _pooledReadEventArgs.SocketAsyncEvent;

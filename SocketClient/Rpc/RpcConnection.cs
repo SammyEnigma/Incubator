@@ -3,10 +3,12 @@ using System;
 
 namespace Incubator.SocketClient.Rpc
 {
-    public sealed class RpcConnection : ClientConnectionBase, IPooledWapper
-    {        
+    public sealed class RpcConnection : BaseClientConnection, IPooledWapper
+    {
+        bool _debug;
         bool _disposed;
         ObjectPool<IPooledWapper> _pool;
+
         public DateTime LastGetTime { set; get; }
         public bool IsDisposed { get { return _disposed; } }
         public event EventHandler<Package> OnMessageReceived;
@@ -15,14 +17,15 @@ namespace Incubator.SocketClient.Rpc
             : base(address, port, bufferSize, debug)
         {
             if (pool == null)
-                throw new ArgumentNullException("pool不能为空");
+                throw new ArgumentNullException("pool");
+
+            _debug = debug;
             _disposed = false;
             _pool = pool;
         }
 
         ~RpcConnection()
         {
-            //必须为false
             Dispose(false);
         }
 
@@ -55,5 +58,5 @@ namespace Incubator.SocketClient.Rpc
             // 让类型知道自己已经被释放
             _disposed = true;
         }
-    }    
+    }
 }

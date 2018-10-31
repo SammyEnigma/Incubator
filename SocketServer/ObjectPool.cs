@@ -13,15 +13,16 @@ namespace Incubator.SocketServer
 
     public sealed class ObjectPool<T> : IDisposable where T : IPooledWapper
     {
-        private bool _disposed;
-        private int _minRetained;
-        private int _maxRetained;
-        private SemaphoreSlim _solts;
-        private ConcurrentBag<T> _objects;
-        private Func<ObjectPool<T>, T> _objectGenerator;
+        bool _debug;
+        bool _disposed;
+        int _minRetained;
+        int _maxRetained;
+        SemaphoreSlim _solts;
+        ConcurrentBag<T> _objects;
+        Func<ObjectPool<T>, T> _objectGenerator;
         public bool IsDisposed { get { return _disposed; } }
 
-        public ObjectPool(int maxRetained, int minRetained, Func<ObjectPool<T>, T> objectGenerator)
+        public ObjectPool(int maxRetained, int minRetained, Func<ObjectPool<T>, T> objectGenerator, bool debug = false)
         {
             if (objectGenerator == null)
                 throw new ArgumentNullException("objectGenerator不能为空");
@@ -32,6 +33,7 @@ namespace Incubator.SocketServer
             if (maxRetained < minRetained)
                 throw new ArgumentException("maxRetained不能小于minRetained");
 
+            _debug = debug;
             _disposed = false;
             _minRetained = minRetained;
             _maxRetained = maxRetained;
@@ -48,7 +50,6 @@ namespace Incubator.SocketServer
 
         ~ObjectPool()
         {
-            //必须为false
             Dispose(false);
         }
 

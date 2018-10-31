@@ -14,34 +14,34 @@ namespace Incubator.SocketServer
     // 就是saea挂载的Completed事件；
     //
     // 于是，逻辑流执行的理论顺序应该是m_eventArgs.Completed -》SocketAwaitable.OnCompleted，
-    public sealed class SocketAwaitable : INotifyCompletion
+    public sealed class SocketAwaitable : INotifyCompletion, IDisposable
     {
-        private readonly static Action SENTINEL = () => { };
+        bool _debug;
+        bool _disposed;
+        BaseListener _listener;
+        readonly static Action SENTINEL = () => { };
 
         internal bool m_wasCompleted;
         internal Action m_continuation;
         internal SocketAsyncEventArgs m_eventArgs;
 
-        public SocketAwaitable(SocketAsyncEventArgs eventArgs, BaseListener listener)
+        public SocketAwaitable(SocketAsyncEventArgs eventArgs, BaseListener listener, bool debug = false)
         {
             if (eventArgs == null)
                 throw new ArgumentNullException("eventArgs");
+            if (listener == null)
+                throw new ArgumentNullException("listener");
+
+            _debug = debug;
+            _disposed = false;
+            _listener = listener;
             m_eventArgs = eventArgs;
-            m_eventArgs.Completed += delegate
-            {
-                var prev = m_continuation ?? Interlocked.CompareExchange(
-                    ref m_continuation, SENTINEL, null);
-                if (prev != null)
-                {
-                    Task.Factory.StartNew(() =>
-                    {
-                        prev();
-                    },
-                    CancellationToken.None,
-                    TaskCreationOptions.None,
-                    listener.Scheduler);
-                }
-            };
+            m_eventArgs.Completed += IO_Completed;
+        }
+
+        ~SocketAwaitable()
+        {
+            Dispose(false);
         }
 
         internal void Reset()
@@ -68,6 +68,56 @@ namespace Incubator.SocketServer
         {
             if (m_eventArgs.SocketError != SocketError.Success)
                 throw new SocketException((int)m_eventArgs.SocketError);
+        }
+
+        private void IO_Completed(object sender, SocketAsyncEventArgs e)
+        {
+            var prev = m_continuation ?? Interlocked.CompareExchange(
+                    ref m_continuation, SENTINEL, null);
+            if (prev != null)
+            {
+                Task.Factory.StartNew(() =>
+                {
+                    prev();
+                },
+                CancellationToken.None,
+                TaskCreationOptions.None,
+                _listener.Scheduler);
+            }
+        }
+
+        private void Print(string message)
+        {
+            if (_debug)
+            {
+                Console.WriteLine(message);
+            }
+        }
+
+        public void Dispose()
+        {
+            // 必须为true
+            Dispose(true);
+            // 通知垃圾回收机制不再调用终结器（析构器）
+            GC.SuppressFinalize(this);
+        }
+
+        private void Dispose(bool disposing)
+        {
+            if (_disposed)
+            {
+                return;
+            }
+            if (disposing)
+            {
+                // 清理托管资源
+                m_eventArgs.Completed -= IO_Completed;
+            }
+
+            // 清理非托管资源
+
+            // 让类型知道自己已经被释放
+            _disposed = true;
         }
     }
 }
