@@ -7,7 +7,6 @@ namespace Incubator.SocketServer
 {
     public abstract class StreamedSocketConnection : BaseConnection
     {
-        bool _debug;
         bool _disposed;
         int _position;
         byte[] _largebuffer;
@@ -17,7 +16,6 @@ namespace Incubator.SocketServer
         public StreamedSocketConnection(int id, Socket socket, BaseListener listener, bool debug = false)
             : base(id, socket, listener, debug)
         {
-            _debug = debug;
             _disposed = false;
             _position = 0;
             _pooledReadEventArgs = _socketListener.SocketAsyncReceiveEventArgsPool.Get() as PooledSocketAsyncEventArgs;
@@ -26,8 +24,8 @@ namespace Incubator.SocketServer
             _pooledSendEventArgs = _socketListener.SocketAsyncSendEventArgsPool.Get() as PooledSocketAsyncEventArgs;
             _sendEventArgs = _pooledSendEventArgs.SocketAsyncEvent;
 
-            _readAwait = new SocketAwaitable(_readEventArgs, listener, _debug);
-            _sendAwait = new SocketAwaitable(_sendEventArgs, listener, _debug);
+            _readAwait = new SocketAwaitable(_readEventArgs, listener, debug);
+            _sendAwait = new SocketAwaitable(_sendEventArgs, listener, debug);
         }
 
         ~StreamedSocketConnection()

@@ -5,7 +5,6 @@ namespace Incubator.SocketClient.Rpc
 {
     public sealed class RpcConnection : BaseClientConnection, IPooledWapper
     {
-        bool _debug;
         bool _disposed;
         ObjectPool<IPooledWapper> _pool;
 
@@ -19,7 +18,6 @@ namespace Incubator.SocketClient.Rpc
             if (pool == null)
                 throw new ArgumentNullException("pool");
 
-            _debug = debug;
             _disposed = false;
             _pool = pool;
         }

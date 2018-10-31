@@ -216,16 +216,14 @@ namespace Incubator.SocketServer
             }
         }
 
-        bool _debug;
         bool _disposed;
         FixHeaderDecoder _decoder;
 
         public SocketConnection(int id, Socket socket, BaseListener listener, bool debug = false) 
             : base(id, socket, listener, debug)
         {
-            _debug = debug;
             _disposed = false;
-            _decoder = new FixHeaderDecoder(this, _debug);
+            _decoder = new FixHeaderDecoder(this, debug);
 
             _pooledReadEventArgs = _socketListener.SocketAsyncReceiveEventArgsPool.Get() as PooledSocketAsyncEventArgs;
             _readEventArgs = _pooledReadEventArgs.SocketAsyncEvent;

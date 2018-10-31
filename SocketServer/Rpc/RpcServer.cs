@@ -28,16 +28,8 @@ namespace Incubator.SocketServer
             _serviceKeys = new ConcurrentDictionary<string, int>();
             _services = new ConcurrentDictionary<int, ServiceInstance>();
             _parameterTransferHelper = new ParameterTransferHelper();
-            _listener = new SocketListener(_maxConnectionCount, _bufferSize);
+            _listener = new RpcListener(_maxConnectionCount, _bufferSize, debug);
             _endPoint = new IPEndPoint(IPAddress.Parse(address), port);
-            Init();
-        }
-
-        public void Init()
-        {
-            (_listener as IConnectionEvents).OnConnectionCreated += On_ConnectionCreated;
-            (_listener as IConnectionEvents).OnConnectionClosed += On_ConnectionClosed;
-            (_listener as IConnectionEvents).OnConnectionAborted += On_ConnectionAborted;
         }
 
         public void Start()
@@ -72,21 +64,6 @@ namespace Incubator.SocketServer
         private void ServerStopped()
         {
             Console.WriteLine("server已关闭");
-        }
-
-        private void On_ConnectionCreated(object sender, ConnectionInfo e)
-        {
-            Console.WriteLine("新建立连接：" + e);
-        }
-
-        private void On_ConnectionClosed(object sender, ConnectionInfo e)
-        {
-            Console.WriteLine("client主动关闭连接：" + e);
-        }
-
-        private void On_ConnectionAborted(object sender, ConnectionInfo e)
-        {
-            Console.WriteLine("连接被强制终止：" + e);
         }
 
         /// <summary>
