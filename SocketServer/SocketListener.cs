@@ -52,12 +52,12 @@ namespace Incubator.SocketServer
     {
         protected bool _disposed;
         protected bool _debug;
-        protected int _bufferSize;
         protected Socket _socket;
         protected Thread _sendMessageWorker;
         protected ManualResetEventSlim _shutdownEvent;
         protected BlockingCollection<Package> _sendingQueue;
 
+        internal int BufferSize;
         internal IOCompletionPortTaskScheduler Scheduler;
         internal ObjectPool<IPooledWapper> SocketAsyncReceiveEventArgsPool;
         internal ObjectPool<IPooledWapper> SocketAsyncSendEventArgsPool;
@@ -126,7 +126,7 @@ namespace Incubator.SocketServer
         }
     }
 
-    public class SocketListener : BaseListener, IConnectionEvents, IInnerCallBack, IDisposable
+    public class SocketListener : BaseListener, IConnectionEvents, IInnerCallBack
     {
         private int _maxConnectionCount;
         private volatile int _connectedCount;
@@ -144,7 +144,7 @@ namespace Incubator.SocketServer
         public SocketListener(int maxConnectionCount, int bufferSize, bool debug = false)
         {
             _debug = debug;
-            _bufferSize = bufferSize;
+            BufferSize = bufferSize;
             _maxConnectionCount = maxConnectionCount;
             _acceptedClientsSemaphore = new SemaphoreSlim(maxConnectionCount, maxConnectionCount);
             _sendingQueue = new BlockingCollection<Package>();

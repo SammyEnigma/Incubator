@@ -6,77 +6,224 @@ using System.Threading.Tasks;
 
 namespace Incubator.SocketServer
 {
-    public interface IConnection
-    { }
-
-    public class ConnectionAbortedException : OperationCanceledException
+    public sealed class SocketConnection : ConnectionBase
     {
-        public ConnectionAbortedException() 
-            : this("The connection was aborted")
+        class FixHeaderDecoder
         {
+            private enum ParseEnum
+            {
+                Received = 1,
+                Process_Head = 2,
+                Process_Body = 3,
+                Find_Body = 4
+            }
+
+            bool _debug;
+            ParseEnum _parseStatus;
+            byte[] headBuffer = null;
+            byte[] bodyBuffer = null;
+            int maxMessageLength = 512;
+            int headLength = 4;
+
+            int offset = 0;
+            int messageLength = 0;
+            int prefixBytesDoneCount = 0;
+            int prefixBytesDoneThisOp = 0;
+            int messageBytesDoneCount = 0;
+            int messageBytesDoneThisOp = 0;
+            int remainingBytesToProcess = 0;
+            SocketConnection _connection;
+
+            public FixHeaderDecoder(SocketConnection connection)
+            {
+                _debug = false;
+                _parseStatus = ParseEnum.Received;
+                _connection = connection;
+            }
+
+            public void ProcessReceive(SocketAsyncEventArgs e)
+            {
+                Print("当前线程id：" + Thread.CurrentThread.ManagedThreadId);
+                while (true)
+                {
+                    #region ParseLogic
+                    switch (_parseStatus)
+                    {
+                        case ParseEnum.Received:
+                            {
+                                prefixBytesDoneThisOp = 0;
+                                messageBytesDoneThisOp = 0;
+
+                                var read = e.BytesTransferred;
+                                if (e.SocketError == SocketError.Success)
+                                {
+                                    // 接收到FIN
+                                    if (read == 0)
+                                    {
+                                        _connection.DoClose();
+                                        return;
+                                    }
+
+                                    remainingBytesToProcess = read;
+                                    _parseStatus = ParseEnum.Process_Head;
+                                }
+                                else
+                                {
+                                    _connection.DoAbort("e.SocketError != SocketError.Success");
+                                    return;
+                                }
+                            }
+                            break;
+                        case ParseEnum.Process_Head:
+                            {
+                                if (prefixBytesDoneCount < headLength)
+                                {
+                                    if (prefixBytesDoneCount == 0)
+                                    {
+                                        headBuffer = ArrayPool<byte>.Shared.Rent(headLength);
+                                    }
+
+                                    if (remainingBytesToProcess >= headLength - prefixBytesDoneCount)
+                                    {
+                                        Buffer.BlockCopy(
+                                            e.Buffer,
+                                            0 + offset,
+                                            headBuffer,
+                                            prefixBytesDoneCount,
+                                            headLength - prefixBytesDoneCount);
+
+                                        prefixBytesDoneThisOp = headLength - prefixBytesDoneCount;
+                                        prefixBytesDoneCount += prefixBytesDoneThisOp;
+                                        remainingBytesToProcess = remainingBytesToProcess - prefixBytesDoneThisOp;
+                                        messageLength = BitConverter.ToInt32(headBuffer, 0);
+                                        ArrayPool<byte>.Shared.Return(headBuffer, true);
+                                        if (messageLength == 0 || messageLength > maxMessageLength)
+                                        {
+                                            _connection.DoAbort("消息长度为0或超过最大限制，直接丢弃");
+                                            return;
+                                        }
+
+                                        _parseStatus = ParseEnum.Process_Body;
+                                    }
+                                    else
+                                    {
+                                        Buffer.BlockCopy(
+                                            e.Buffer,
+                                            0 + offset,
+                                            headBuffer,
+                                            prefixBytesDoneCount,
+                                            remainingBytesToProcess);
+
+                                        prefixBytesDoneThisOp = remainingBytesToProcess;
+                                        prefixBytesDoneCount += prefixBytesDoneThisOp;
+                                        remainingBytesToProcess = 0;
+
+                                        offset = 0;
+
+                                        _parseStatus = ParseEnum.Received;
+                                        // 开始新一次recv
+                                        _connection.DoReceive(e);
+                                        return;
+                                    }
+                                }
+                                else
+                                {
+                                    _parseStatus = ParseEnum.Process_Body;
+                                }
+                            }
+                            break;
+                        case ParseEnum.Process_Body:
+                            {
+                                if (messageBytesDoneCount == 0)
+                                {
+                                    bodyBuffer = ArrayPool<byte>.Shared.Rent(messageLength);
+                                }
+
+                                if (remainingBytesToProcess >= messageLength - messageBytesDoneCount)
+                                {
+                                    Buffer.BlockCopy(
+                                        e.Buffer,
+                                        prefixBytesDoneThisOp + offset,
+                                        bodyBuffer,
+                                        messageBytesDoneCount,
+                                        messageLength - messageBytesDoneCount);
+
+                                    messageBytesDoneThisOp = messageLength - messageBytesDoneCount;
+                                    messageBytesDoneCount += messageBytesDoneThisOp;
+                                    remainingBytesToProcess = remainingBytesToProcess - messageBytesDoneThisOp;
+
+                                    _parseStatus = ParseEnum.Find_Body;
+                                }
+                                else
+                                {
+                                    Buffer.BlockCopy(
+                                        e.Buffer,
+                                        prefixBytesDoneThisOp + offset,
+                                        bodyBuffer,
+                                        messageBytesDoneCount,
+                                        remainingBytesToProcess);
+
+                                    messageBytesDoneThisOp = remainingBytesToProcess;
+                                    messageBytesDoneCount += messageBytesDoneThisOp;
+                                    remainingBytesToProcess = 0;
+
+                                    offset = 0;
+
+                                    _parseStatus = ParseEnum.Received;
+                                    // 开始新一次recv
+                                    _connection.DoReceive(e);
+                                    return;
+                                }
+                            }
+                            break;
+                        case ParseEnum.Find_Body:
+                            {
+                                _connection.MessageReceived(bodyBuffer, messageLength);
+                                if (remainingBytesToProcess == 0)
+                                {
+                                    messageLength = 0;
+                                    prefixBytesDoneCount = 0;
+                                    messageBytesDoneCount = 0;
+                                    _parseStatus = ParseEnum.Received;
+                                    // 开始新一次recv
+                                    _connection.DoReceive(e);
+                                    return;
+                                }
+                                else
+                                {
+                                    offset += (headLength + messageLength);
+
+                                    messageLength = 0;
+                                    prefixBytesDoneCount = 0;
+                                    prefixBytesDoneThisOp = 0;
+                                    messageBytesDoneCount = 0;
+                                    messageBytesDoneThisOp = 0;
+                                    _parseStatus = ParseEnum.Process_Head;
+                                }
+                            }
+                            break;
+                    }
+                    #endregion
+                }
+            }
+
+            private void Print(string message)
+            {
+                if (_debug)
+                {
+                    Console.WriteLine(message);
+                }
+            }
         }
 
-        public ConnectionAbortedException(string message) 
-            : base(message)
-        {
-        }
-
-        public ConnectionAbortedException(string message, Exception inner) 
-            : base(message, inner)
-        {
-        }
-    }
-
-    public class SocketConnection : IConnection, IDisposable
-    {
-        private enum ParseEnum
-        {
-            Received = 1,
-            Process_Head = 2,
-            Process_Body = 3,
-            Find_Body = 4
-        }
-
-        const int NOT_STARTED = 1;
-        const int STARTED = 2;
-        const int SHUTTING_DOWN = 3;
-        const int SHUTDOWN = 4;
-        volatile int _execStatus;
-
-        int _id;
-        bool _debug;
         bool _disposed;
-        Socket _socket;
-        BaseListener _socketListener;
-        PooledSocketAsyncEventArgs _pooledReadEventArgs;
-        PooledSocketAsyncEventArgs _pooledSendEventArgs;
-        SocketAsyncEventArgs _readEventArgs;
-        SocketAsyncEventArgs _sendEventArgs;
+        FixHeaderDecoder _decoder;
 
-        ParseEnum _parseStatus;
-        byte[] headBuffer = null;
-        byte[] bodyBuffer = null;
-        int maxMessageLength = 512;
-        int headLength = 4;
-
-        int offset = 0;
-        int messageLength = 0;
-        int prefixBytesDoneCount = 0;
-        int prefixBytesDoneThisOp = 0;
-        int messageBytesDoneCount = 0;
-        int messageBytesDoneThisOp = 0;
-        int remainingBytesToProcess = 0;
-
-        internal int Id { get { return _id; } }
-
-        public SocketConnection(int id, Socket socket, BaseListener listener, bool debug)
+        public SocketConnection(int id, Socket socket, BaseListener listener, bool debug) 
+            : base(id, socket, listener, debug)
         {
-            _id = id;
-            _debug = debug;
-            _execStatus = NOT_STARTED;
-            _socketListener = listener;
-            _parseStatus = ParseEnum.Received;
-            _socket = socket;
+            _decoder = new FixHeaderDecoder(this);
+
             _pooledReadEventArgs = _socketListener.SocketAsyncReceiveEventArgsPool.Get() as PooledSocketAsyncEventArgs;
             _readEventArgs = _pooledReadEventArgs.SocketAsyncEvent;
             _readEventArgs.Completed += IO_Completed;
@@ -92,208 +239,21 @@ namespace Incubator.SocketServer
             Dispose(false);
         }
 
-        public void Start()
+        protected override void InnerStart()
         {
-            Task.Factory.StartNew(() =>
+            Print("当前线程id：" + Thread.CurrentThread.ManagedThreadId);
+            Interlocked.CompareExchange(ref _execStatus, STARTED, NOT_STARTED);
+            var willRaiseEvent = _socket.ReceiveAsync(_readEventArgs);
+            if (!willRaiseEvent)
             {
-                Print("当前线程id：" + Thread.CurrentThread.ManagedThreadId);
-                Interlocked.CompareExchange(ref _execStatus, STARTED, NOT_STARTED);
-                var willRaiseEvent = _socket.ReceiveAsync(_readEventArgs);
-                if (!willRaiseEvent)
-                {
-                    ProcessReceive(_readEventArgs);
-                }
-            },
-            CancellationToken.None,
-            TaskCreationOptions.None,
-            _socketListener.Scheduler);
-        }
-
-        public void Close()
-        {
-            Interlocked.CompareExchange(ref _execStatus, SHUTTING_DOWN, STARTED);
-            // close the socket associated with the client
-            try
-            {
-                _socket.Shutdown(SocketShutdown.Send);
+                ProcessReceive(_readEventArgs);
             }
-            // throws if client process has already closed
-            catch
-            {
-            }
-            _socket.Close();
-            Interlocked.CompareExchange(ref _execStatus, SHUTDOWN, SHUTTING_DOWN);
         }
 
         private void ProcessReceive(SocketAsyncEventArgs e)
         {
-            Print("当前线程id：" + Thread.CurrentThread.ManagedThreadId);
-            if (_execStatus >= SHUTTING_DOWN)
-            {
-                return;
-            }
-
-            while (true)
-            {
-                #region ParseLogic
-                switch (_parseStatus)
-                {
-                    case ParseEnum.Received:
-                        {
-                            prefixBytesDoneThisOp = 0;
-                            messageBytesDoneThisOp = 0;
-
-                            var read = e.BytesTransferred;
-                            if (e.SocketError == SocketError.Success)
-                            {
-                                // 接收到FIN
-                                if (read == 0)
-                                {
-                                    DoClose();
-                                    return;
-                                }
-
-                                remainingBytesToProcess = read;
-                                _parseStatus = ParseEnum.Process_Head;
-                            }
-                            else
-                            {
-                                DoAbort("e.SocketError != SocketError.Success");
-                                return;
-                            }
-                        }
-                        break;
-                    case ParseEnum.Process_Head:
-                        {
-                            if (prefixBytesDoneCount < headLength)
-                            {
-                                if (prefixBytesDoneCount == 0)
-                                {
-                                    headBuffer = ArrayPool<byte>.Shared.Rent(headLength);
-                                }
-
-                                if (remainingBytesToProcess >= headLength - prefixBytesDoneCount)
-                                {
-                                    Buffer.BlockCopy(
-                                        e.Buffer,
-                                        0 + offset,
-                                        headBuffer,
-                                        prefixBytesDoneCount,
-                                        headLength - prefixBytesDoneCount);
-
-                                    prefixBytesDoneThisOp = headLength - prefixBytesDoneCount;
-                                    prefixBytesDoneCount += prefixBytesDoneThisOp;
-                                    remainingBytesToProcess = remainingBytesToProcess - prefixBytesDoneThisOp;
-                                    messageLength = BitConverter.ToInt32(headBuffer, 0);
-                                    ArrayPool<byte>.Shared.Return(headBuffer, true);
-                                    if (messageLength == 0 || messageLength > maxMessageLength)
-                                    {
-                                        DoAbort("消息长度为0或超过最大限制，直接丢弃");
-                                        return;
-                                    }
-
-                                    _parseStatus = ParseEnum.Process_Body;
-                                }
-                                else
-                                {
-                                    Buffer.BlockCopy(
-                                        e.Buffer,
-                                        0 + offset,
-                                        headBuffer,
-                                        prefixBytesDoneCount,
-                                        remainingBytesToProcess);
-
-                                    prefixBytesDoneThisOp = remainingBytesToProcess;
-                                    prefixBytesDoneCount += prefixBytesDoneThisOp;
-                                    remainingBytesToProcess = 0;
-
-                                    offset = 0;
-
-                                    _parseStatus = ParseEnum.Received;
-                                    // 开始新一次recv
-                                    DoReceive(e);
-                                    return;
-                                }
-                            }
-                            else
-                            {
-                                _parseStatus = ParseEnum.Process_Body;
-                            }
-                        }
-                        break;
-                    case ParseEnum.Process_Body:
-                        {
-                            if (messageBytesDoneCount == 0)
-                            {
-                                bodyBuffer = ArrayPool<byte>.Shared.Rent(messageLength);
-                            }
-
-                            if (remainingBytesToProcess >= messageLength - messageBytesDoneCount)
-                            {
-                                Buffer.BlockCopy(
-                                    e.Buffer,
-                                    prefixBytesDoneThisOp + offset,
-                                    bodyBuffer,
-                                    messageBytesDoneCount,
-                                    messageLength - messageBytesDoneCount);
-
-                                messageBytesDoneThisOp = messageLength - messageBytesDoneCount;
-                                messageBytesDoneCount += messageBytesDoneThisOp;
-                                remainingBytesToProcess = remainingBytesToProcess - messageBytesDoneThisOp;
-
-                                _parseStatus = ParseEnum.Find_Body;
-                            }
-                            else
-                            {
-                                Buffer.BlockCopy(
-                                    e.Buffer,
-                                    prefixBytesDoneThisOp + offset,
-                                    bodyBuffer,
-                                    messageBytesDoneCount,
-                                    remainingBytesToProcess);
-
-                                messageBytesDoneThisOp = remainingBytesToProcess;
-                                messageBytesDoneCount += messageBytesDoneThisOp;
-                                remainingBytesToProcess = 0;
-
-                                offset = 0;
-
-                                _parseStatus = ParseEnum.Received;
-                                // 开始新一次recv
-                                DoReceive(e);
-                                return;
-                            }
-                        }
-                        break;
-                    case ParseEnum.Find_Body:
-                        {
-                            MessageReceived(bodyBuffer, messageLength);
-                            if (remainingBytesToProcess == 0)
-                            {
-                                messageLength = 0;
-                                prefixBytesDoneCount = 0;
-                                messageBytesDoneCount = 0;
-                                _parseStatus = ParseEnum.Received;
-                                // 开始新一次recv
-                                DoReceive(e);
-                                return;
-                            }
-                            else
-                            {
-                                offset += (headLength + messageLength);
-
-                                messageLength = 0;
-                                prefixBytesDoneCount = 0;
-                                prefixBytesDoneThisOp = 0;
-                                messageBytesDoneCount = 0;
-                                messageBytesDoneThisOp = 0;
-                                _parseStatus = ParseEnum.Process_Head;
-                            }
-                        }
-                        break;
-                }
-                #endregion
-            }
+            if (_execStatus == STARTED)
+                _decoder.ProcessReceive(e);
         }
 
         private void DoReceive(SocketAsyncEventArgs e)
@@ -305,22 +265,7 @@ namespace Incubator.SocketServer
             }
         }
 
-        private void DoClose()
-        {
-            Close();
-            (_socketListener as IInnerCallBack).ConnectionClosed(new ConnectionInfo { Num = this.Id, Description = string.Empty, Time = DateTime.Now });
-        }
-
-        private void DoAbort(string reason)
-        {
-            Close();
-            Dispose();
-            // todo: 直接被设置到task的result里面了，在listener的线程中抓不到这个异常
-            // 类似的其它异常也需要注意这种情况
-            throw new ConnectionAbortedException(reason);
-        }
-
-        private void MessageReceived(byte[] messageData, int length)
+        internal void MessageReceived(byte[] messageData, int length)
         {
             (_socketListener as IInnerCallBack).MessageReceived(this, messageData, length);
         }
@@ -382,23 +327,7 @@ namespace Incubator.SocketServer
             _socketListener.Scheduler);
         }
 
-        private void Print(string message)
-        {
-            if (_debug)
-            {
-                Console.WriteLine(message);
-            }
-        }
-
-        public void Dispose()
-        {
-            // 必须为true
-            Dispose(true);
-            // 通知垃圾回收机制不再调用终结器（析构器）
-            GC.SuppressFinalize(this);
-        }
-
-        private void Dispose(bool disposing)
+        protected override void Dispose(bool disposing)
         {
             if (_disposed)
             {
@@ -407,19 +336,18 @@ namespace Incubator.SocketServer
             if (disposing)
             {
                 // 清理托管资源
-                _socket.Dispose();
                 _sendEventArgs.UserToken = null;
                 _sendEventArgs.Completed -= IO_Completed;
                 _readEventArgs.UserToken = null;
                 _readEventArgs.Completed -= IO_Completed;
-                _socketListener.SocketAsyncSendEventArgsPool.Put(_pooledSendEventArgs);
-                _socketListener.SocketAsyncReceiveEventArgsPool.Put(_pooledReadEventArgs);
             }
 
             // 清理非托管资源
 
             // 让类型知道自己已经被释放
             _disposed = true;
+
+            base.Dispose();
         }
     }
 }
