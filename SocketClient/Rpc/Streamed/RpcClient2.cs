@@ -1,4 +1,4 @@
-﻿using Incubator.SocketServer;
+﻿using Incubator.Network;
 using System;
 using System.Collections.Concurrent;
 using System.Net;
@@ -96,8 +96,6 @@ namespace Incubator.SocketClient.Rpc
 
             using (var conn = ((RpcConnection2)_connectionPool.Get()))
             {
-                conn.Connect();
-
                 // write the message type
                 await conn.Write((int)MessageType.MethodInvocation);
 

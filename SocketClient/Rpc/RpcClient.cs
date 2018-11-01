@@ -1,4 +1,4 @@
-﻿using Incubator.SocketServer;
+﻿using Incubator.Network;
 using System;
 using System.Collections.Concurrent;
 using System.IO;

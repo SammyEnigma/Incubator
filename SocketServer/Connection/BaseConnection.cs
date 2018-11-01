@@ -1,17 +1,13 @@
 ﻿using System;
 using System.Net.Sockets;
 using System.Threading;
-using System.Threading.Tasks;
 
-namespace Incubator.SocketServer
+namespace Incubator.Network
 {
-    public interface IConnection
-    { }
-
     public class ConnectionAbortedException : OperationCanceledException
     {
         public ConnectionAbortedException()
-            : this("The connection was aborted")
+            : this("连接终止")
         {
         }
 
@@ -26,7 +22,7 @@ namespace Incubator.SocketServer
         }
     }
 
-    public abstract class BaseConnection : IConnection, IDisposable
+    public abstract class BaseConnection : IDisposable
     {
         int _id;
         bool _debug;
@@ -37,23 +33,26 @@ namespace Incubator.SocketServer
         protected const int SHUTTING_DOWN = 3;
         protected const int SHUTDOWN = 4;
         protected volatile int _execStatus;
-
         protected Socket _socket;
-        protected BaseListener _socketListener;
-        protected SocketAsyncEventArgs _readEventArgs;
-        protected SocketAsyncEventArgs _sendEventArgs;
-        protected PooledSocketAsyncEventArgs _pooledReadEventArgs;
-        protected PooledSocketAsyncEventArgs _pooledSendEventArgs;
 
         internal int Id { get { return _id; } }
+        #region 事件
+        internal event EventHandler<ConnectionInfo> OnConnectionClosed;
+        #endregion
+        internal static IOCompletionPortTaskScheduler Scheduler;
 
-        public BaseConnection(int id, Socket socket, BaseListener listener, bool debug = false)
+        static BaseConnection()
+        {
+            var concurrency = Environment.ProcessorCount;
+            Scheduler = new IOCompletionPortTaskScheduler(concurrency, concurrency);
+        }
+
+        public BaseConnection(int id, Socket socket, bool debug = false)
         {
             _id = id;
             _debug = debug;
             _disposed = false;
             _execStatus = NOT_STARTED;
-            _socketListener = listener;
             _socket = socket;
         }
 
@@ -63,18 +62,7 @@ namespace Incubator.SocketServer
             Dispose(false);
         }
 
-        public async void Start()
-        {
-            await Task.Factory.StartNew(() =>
-            {
-                InnerStart();
-            },
-            CancellationToken.None,
-            TaskCreationOptions.None,
-            _socketListener.Scheduler);
-        }
-
-        protected abstract void InnerStart();
+        public abstract void Start();
 
         public void Close()
         {
@@ -92,13 +80,14 @@ namespace Incubator.SocketServer
             Interlocked.CompareExchange(ref _execStatus, SHUTDOWN, SHUTTING_DOWN);
         }
 
-        internal void DoClose()
+        public void DoClose()
         {
             Close();
-            (_socketListener as IInnerCallBack).ConnectionClosed(new ConnectionInfo { Num = this.Id, Description = string.Empty, Time = DateTime.Now });
+            Dispose();
+            OnConnectionClosed?.Invoke(this, new ConnectionInfo { Num = _id, Description = string.Empty, Time = DateTime.Now });
         }
 
-        internal void DoAbort(string reason)
+        public void DoAbort(string reason)
         {
             Close();
             Dispose();
@@ -133,8 +122,6 @@ namespace Incubator.SocketServer
             {
                 // 清理托管资源
                 _socket.Dispose();
-                _socketListener.SocketAsyncSendEventArgsPool.Put(_pooledSendEventArgs);
-                _socketListener.SocketAsyncReceiveEventArgsPool.Put(_pooledReadEventArgs);
             }
 
             // 清理非托管资源

@@ -1,6 +1,6 @@
 ﻿using System;
 
-namespace Incubator.SocketServer.Rpc
+namespace Incubator.Network
 {
     internal class DefaultTypeMaker
     {

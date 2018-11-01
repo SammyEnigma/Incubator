@@ -1,4 +1,4 @@
-﻿namespace Incubator.SocketServer.Rpc
+﻿namespace Incubator.Network
 {
     public class ServiceSyncInfo
     {

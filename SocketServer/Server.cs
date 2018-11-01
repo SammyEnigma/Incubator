@@ -2,32 +2,30 @@
 using System.Net;
 using System.Text;
 
-namespace Incubator.SocketServer
+namespace Incubator.Network
 {
     public class Server
     {
         int _bufferSize = 256;
         int _maxConnectionCount = 500;
-        bool _debug;
         IPEndPoint _endPoint;
         SocketListener _listener;
 
         public Server(string address, int port, bool debug = false)
         {
-            _debug = debug;
-            _listener = new SocketListener(_maxConnectionCount, _bufferSize);
+            _listener = new SocketListener(_maxConnectionCount, _bufferSize, debug);
             _endPoint = new IPEndPoint(IPAddress.Parse(address), port);
             Init();
         }
 
         public void Init()
         {
-            (_listener as IConnectionEvents).OnConnectionCreated += On_ConnectionCreated;
-            (_listener as IConnectionEvents).OnConnectionClosed += On_ConnectionClosed;
-            (_listener as IConnectionEvents).OnConnectionAborted += On_ConnectionAborted;
-            (_listener as IConnectionEvents).OnMessageReceived += On_MessageReceived;
-            (_listener as IConnectionEvents).OnMessageSending += On_MessageSending;
-            (_listener as IConnectionEvents).OnMessageSent += On_MessageSent;
+            _listener.OnConnectionCreated += On_ConnectionCreated;
+            _listener.OnConnectionClosed += On_ConnectionClosed;
+            _listener.OnConnectionAborted += On_ConnectionAborted;
+            _listener.OnMessageReceived += On_MessageReceived;
+            _listener.OnMessageSending += On_MessageSending;
+            _listener.OnMessageSent += On_MessageSent;
         }
 
         public void Start()

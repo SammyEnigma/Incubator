@@ -5,7 +5,7 @@ using System.IO;
 using System.Linq;
 using System.Text;
 
-namespace Incubator.SocketServer.Rpc
+namespace Incubator.Network
 {
     public sealed class ParameterTransferHelper
     {

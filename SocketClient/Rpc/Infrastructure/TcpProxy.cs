@@ -7,7 +7,7 @@ namespace Incubator.SocketClient.Rpc
     {
         public static TInterface CreateProxy<TInterface>(IPEndPoint endpoint) where TInterface : class
         {
-            return ProxyFactory.CreateProxy<TInterface>(typeof(RpcClient2), typeof(IPEndPoint), endpoint);
+            return ProxyFactory.CreateProxy<TInterface>(typeof(RpcClient), typeof(IPEndPoint), endpoint);
         }
     }
 }

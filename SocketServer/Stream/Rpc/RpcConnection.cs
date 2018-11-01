@@ -4,9 +4,9 @@ using System.Net.Sockets;
 using System.Reflection;
 using System.Threading.Tasks;
 
-namespace Incubator.SocketServer.Rpc
+namespace Incubator.Network
 {
-    public class RpcConnection : StreamedSocketConnection
+    public sealed class RpcConnection : StreamedSocketConnection
     {
         class InvokeInfo
         {
@@ -21,19 +21,28 @@ namespace Incubator.SocketServer.Rpc
             public object[] ReturnParameters;
         }
 
+        bool _disposed;
+        RpcListener _listener;
         ConcurrentDictionary<string, int> _serviceKeys;
         ConcurrentDictionary<int, ServiceInstance> _services;
         ParameterTransferHelper _parameterTransferHelper;
 
-        public RpcConnection(int id, Socket socket, BaseListener listener, bool debug)
-            : base(id, socket, listener, debug)
+        public RpcConnection(int id, Socket socket, RpcListener listener, bool debug)
+            : base(id, socket, debug)
         {
+            _listener = listener;
             _serviceKeys = new ConcurrentDictionary<string, int>();
             _services = new ConcurrentDictionary<int, ServiceInstance>();
             _parameterTransferHelper = new ParameterTransferHelper();
+
+            _readEventArgs = _listener.SocketAsyncReadEventArgsPool.Get() as PooledSocketAsyncEventArgs;
+            _sendEventArgs = _listener.SocketAsyncSendEventArgsPool.Get() as PooledSocketAsyncEventArgs;
+
+            _readAwait = new SocketAwaitable(_readEventArgs, Scheduler, debug);
+            _sendAwait = new SocketAwaitable(_sendEventArgs, Scheduler, debug);
         }
 
-        protected override async void InnerStart()
+        public override async void Start()
         {
             while (true)
             {
@@ -132,6 +141,30 @@ namespace Incubator.SocketServer.Rpc
             }
             else
                 await Write((int)MessageType.UnknownMethod);
+        }
+
+        protected override void Dispose(bool disposing)
+        {
+            if (_disposed)
+            {
+                return;
+            }
+            if (disposing)
+            {
+                // 清理托管资源
+                _readAwait.Dispose();
+                _sendAwait.Dispose();
+                _readEventArgs.UserToken = null;
+                _sendEventArgs.UserToken = null;
+                _readEventArgs.Dispose();
+                _sendEventArgs.Dispose();
+            }
+
+            // 清理非托管资源
+
+            // 让类型知道自己已经被释放
+            _disposed = true;
+            base.Dispose();
         }
     }
 }

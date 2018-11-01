@@ -1,13 +1,10 @@
-﻿using Incubator.SocketServer.Rpc;
-using System;
+﻿using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
-using System.IO;
 using System.Net;
 using System.Reflection;
-using System.Text;
 
-namespace Incubator.SocketServer
+namespace Incubator.Network
 {
     public class RpcServer 
     {

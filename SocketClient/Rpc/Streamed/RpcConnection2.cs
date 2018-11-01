@@ -1,38 +1,31 @@
-﻿using System;
-using System.Net.Sockets;
+﻿using Incubator.Network;
+using System;
 
-namespace Incubator.Network
+namespace Incubator.SocketClient.Rpc
 {
-    public sealed class PooledSocketAsyncEventArgs : SocketAsyncEventArgs, IPooledWapper
+    public sealed class RpcConnection2 : StreamedSocketClientConnection, IPooledWapper
     {
-        private bool _disposed;
-        private ObjectPool<IPooledWapper> _pool;
+        bool _disposed;
+        ObjectPool<IPooledWapper> _pool;
         public DateTime LastGetTime { set; get; }
         public bool IsDisposed { get { return _disposed; } }
 
-        public PooledSocketAsyncEventArgs(ObjectPool<IPooledWapper> pool)
+        public RpcConnection2(ObjectPool<IPooledWapper> pool, string address, int port, int bufferSize, bool debug = false)
+            : base(address, port, bufferSize, debug)
         {
             if (pool == null)
                 throw new ArgumentNullException("pool");
+
             _pool = pool;
             _disposed = false;
         }
 
-        ~PooledSocketAsyncEventArgs()
+        ~RpcConnection2()
         {
-            //必须为false
             Dispose(false);
         }
 
-        public new void Dispose()
-        {
-            // 必须为true
-            Dispose(true);
-            // 通知垃圾回收机制不再调用终结器（析构器）
-            GC.SuppressFinalize(this);
-        }
-
-        private void Dispose(bool disposing)
+        protected override void Dispose(bool disposing)
         {
             if (_disposed)
             {

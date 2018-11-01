@@ -3,7 +3,7 @@ using System.Collections.Concurrent;
 using System.Threading;
 using System.Threading.Tasks;
 
-namespace Incubator.SocketServer
+namespace Incubator.Network
 {
     public interface IPooledWapper : IDisposable
     {
@@ -25,7 +25,7 @@ namespace Incubator.SocketServer
         public ObjectPool(int maxRetained, int minRetained, Func<ObjectPool<T>, T> objectGenerator, bool debug = false)
         {
             if (objectGenerator == null)
-                throw new ArgumentNullException("objectGenerator不能为空");
+                throw new ArgumentNullException("objectGenerator");
             if (maxRetained < 1)
                 throw new ArgumentException("maxRetained不能为负");
             if (minRetained < 1)

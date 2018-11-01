@@ -2,7 +2,7 @@ using System;
 using System.Collections.Concurrent;
 using System.Reflection;
 
-namespace Incubator.SocketServer.Rpc
+namespace Incubator.Network
 {
     public class ServiceInstance
     {

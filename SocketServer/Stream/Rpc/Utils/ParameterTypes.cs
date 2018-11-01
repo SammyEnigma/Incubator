@@ -1,4 +1,4 @@
-namespace Incubator.SocketServer.Rpc
+namespace Incubator.Network
 {
     internal sealed class ParameterTypes
     {

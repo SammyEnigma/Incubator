@@ -1,6 +1,6 @@
 ﻿using System.Net.Sockets;
 
-namespace Incubator.SocketServer
+namespace Incubator.Network
 {
     public static class SocketExtensions
     {

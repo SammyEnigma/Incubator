@@ -2,7 +2,7 @@
 using System.Reflection;
 using System.Reflection.Emit;
 
-namespace Incubator.SocketServer.Rpc
+namespace Incubator.Network
 {
 
     public static class TypeExtensions

@@ -4,7 +4,7 @@ using System.Runtime.CompilerServices;
 using System.Threading;
 using System.Threading.Tasks;
 
-namespace Incubator.SocketServer
+namespace Incubator.Network
 {
     // 说明：
     // 比如task，编译器生成的代码会获取taskawait，剩下OnCompleted的触发可以理解为t.continue；
@@ -18,31 +18,23 @@ namespace Incubator.SocketServer
     {
         bool _debug;
         bool _disposed;
-        BaseListener _listener;
+        TaskScheduler _scheduler;
         readonly static Action SENTINEL = () => { };
 
         internal bool m_wasCompleted;
         internal Action m_continuation;
         internal SocketAsyncEventArgs m_eventArgs;
-
         
-        public SocketAwaitable(SocketAsyncEventArgs eventArgs, bool debug = false)
-            : this(eventArgs, null, debug)
-        { }
-
-        // todo: listener在这里携带的信息更多想要表达一种线程模型，后期考虑专门抽象一个类型
-        public SocketAwaitable(SocketAsyncEventArgs eventArgs, BaseListener listener, bool debug = false)
+        public SocketAwaitable(SocketAsyncEventArgs eventArgs, TaskScheduler scheduler = null, bool debug = false)
         {
             if (eventArgs == null)
                 throw new ArgumentNullException("eventArgs");
-            if (listener == null)
-                throw new ArgumentNullException("listener");
 
             _debug = debug;
             _disposed = false;
-            _listener = listener;
             m_eventArgs = eventArgs;
             m_eventArgs.Completed += IO_Completed;
+            _scheduler = scheduler;
         }
 
         ~SocketAwaitable()
@@ -78,11 +70,10 @@ namespace Incubator.SocketServer
 
         private void IO_Completed(object sender, SocketAsyncEventArgs e)
         {
-            var prev = m_continuation ?? Interlocked.CompareExchange(
-                    ref m_continuation, SENTINEL, null);
+            var prev = m_continuation ?? Interlocked.CompareExchange(ref m_continuation, SENTINEL, null);
             if (prev != null)
             {
-                if (_listener == null)
+                if (_scheduler == null)
                 {
                     prev();
                 }
@@ -94,7 +85,7 @@ namespace Incubator.SocketServer
                     },
                     CancellationToken.None,
                     TaskCreationOptions.None,
-                    _listener.Scheduler);
+                    _scheduler);
                 }
             }
         }

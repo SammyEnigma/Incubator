@@ -1,7 +1,7 @@
 ﻿using Incubator.RpcContract;
 using System;
 
-namespace Incubator.SocketServer
+namespace Incubator.Network
 {
     public class DataContractImpl : IDataContract
     {

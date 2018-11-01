@@ -1,7 +1,7 @@
 ﻿using System;
 using System.Collections.Concurrent;
 
-namespace Incubator.SocketServer.Rpc
+namespace Incubator.Network
 {
     public sealed class PooledDictionary<TKey, TValue> : IDisposable
     {

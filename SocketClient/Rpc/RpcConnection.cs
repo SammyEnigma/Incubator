@@ -1,16 +1,18 @@
-﻿using Incubator.SocketServer;
+﻿using Incubator.Network;
 using System;
 
 namespace Incubator.SocketClient.Rpc
 {
-    public sealed class RpcConnection : BaseClientConnection, IPooledWapper
+    public sealed class RpcConnection : SocketClientConnection, IPooledWapper
     {
         bool _disposed;
         ObjectPool<IPooledWapper> _pool;
-
         public DateTime LastGetTime { set; get; }
         public bool IsDisposed { get { return _disposed; } }
+        
+        #region 事件
         public event EventHandler<Package> OnMessageReceived;
+        #endregion
 
         public RpcConnection(ObjectPool<IPooledWapper> pool, string address, int port, int bufferSize, bool debug = false)
             : base(address, port, bufferSize, debug)
@@ -18,8 +20,8 @@ namespace Incubator.SocketClient.Rpc
             if (pool == null)
                 throw new ArgumentNullException("pool");
 
-            _disposed = false;
             _pool = pool;
+            _disposed = false;
         }
 
         ~RpcConnection()

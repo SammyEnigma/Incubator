@@ -1,10 +1,11 @@
 ﻿using System;
 using System.Buffers;
 using System.Net.Sockets;
+using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 
-namespace Incubator.SocketServer
+namespace Incubator.Network
 {
     public sealed class SocketConnection : BaseConnection
     {
@@ -217,21 +218,23 @@ namespace Incubator.SocketServer
         }
 
         bool _disposed;
+        SocketListener _listener;
         FixHeaderDecoder _decoder;
+        PooledSocketAsyncEventArgs _pooledReadEventArgs;
+        PooledSocketAsyncEventArgs _pooledSendEventArgs;
 
-        public SocketConnection(int id, Socket socket, BaseListener listener, bool debug = false) 
-            : base(id, socket, listener, debug)
+        public SocketConnection(int id, Socket socket, SocketListener listener, bool debug = false) 
+            : base(id, socket, debug)
         {
             _disposed = false;
             _decoder = new FixHeaderDecoder(this, debug);
+            _listener = listener;
 
-            _pooledReadEventArgs = _socketListener.SocketAsyncReceiveEventArgsPool.Get() as PooledSocketAsyncEventArgs;
-            _readEventArgs = _pooledReadEventArgs.SocketAsyncEvent;
-            _readEventArgs.Completed += IO_Completed;
+            _pooledReadEventArgs = _listener.SocketAsyncReadEventArgsPool.Get() as PooledSocketAsyncEventArgs;
+            _pooledReadEventArgs.Completed += IO_Completed;
 
-            _pooledSendEventArgs = _socketListener.SocketAsyncSendEventArgsPool.Get() as PooledSocketAsyncEventArgs;
-            _sendEventArgs = _pooledSendEventArgs.SocketAsyncEvent;
-            _sendEventArgs.Completed += IO_Completed;
+            _pooledSendEventArgs = _listener.SocketAsyncSendEventArgsPool.Get() as PooledSocketAsyncEventArgs;
+            _pooledSendEventArgs.Completed += IO_Completed;
         }
 
         ~SocketConnection()
@@ -240,15 +243,21 @@ namespace Incubator.SocketServer
             Dispose(false);
         }
 
-        protected override void InnerStart()
+        public override async void Start()
         {
-            Print("当前线程id：" + Thread.CurrentThread.ManagedThreadId);
-            Interlocked.CompareExchange(ref _execStatus, STARTED, NOT_STARTED);
-            var willRaiseEvent = _socket.ReceiveAsync(_readEventArgs);
-            if (!willRaiseEvent)
+            await Task.Factory.StartNew(() =>
             {
-                ProcessReceive(_readEventArgs);
-            }
+                Print("当前线程id：" + Thread.CurrentThread.ManagedThreadId);
+                Interlocked.CompareExchange(ref _execStatus, STARTED, NOT_STARTED);
+                var willRaiseEvent = _socket.ReceiveAsync(_pooledReadEventArgs);
+                if (!willRaiseEvent)
+                {
+                    ProcessReceive(_pooledReadEventArgs);
+                }
+            },
+            CancellationToken.None,
+            TaskCreationOptions.None,
+            Scheduler);
         }
 
         private void ProcessReceive(SocketAsyncEventArgs e)
@@ -268,35 +277,35 @@ namespace Incubator.SocketServer
 
         internal void MessageReceived(byte[] messageData, int length)
         {
-            (_socketListener as IInnerCallBack).MessageReceived(this, messageData, length);
+            _listener.MessageReceived(this, messageData, length);
         }
 
         internal void InnerSend(Package package)
         {
             if (package.RentFromPool)
-                _sendEventArgs.UserToken = package.MessageData; // 预先保存下来，使用完毕需要回收到ArrayPool中
+                _pooledSendEventArgs.UserToken = package.MessageData; // 预先保存下来，使用完毕需要回收到ArrayPool中
 
             // todo: 缓冲区一次发送不完的情况处理
             if (package.NeedHead)
             {
-                Buffer.BlockCopy(BitConverter.GetBytes(package.DataLength), 0, _sendEventArgs.Buffer, 0, 4);
-                Buffer.BlockCopy(package.MessageData, 0, _sendEventArgs.Buffer, 4, package.DataLength);
+                Buffer.BlockCopy(BitConverter.GetBytes(package.DataLength), 0, _pooledSendEventArgs.Buffer, 0, 4);
+                Buffer.BlockCopy(package.MessageData, 0, _pooledSendEventArgs.Buffer, 4, package.DataLength);
                 // todo: abort和这里的send会有一个race condition，目前考虑的解决办法是abort那里自旋一段时间等
                 // 当次发送完毕了再予以关闭
-                _sendEventArgs.SetBuffer(0, package.DataLength + 4);
+                _pooledSendEventArgs.SetBuffer(0, package.DataLength + 4);
             }
             else
             {
-                Buffer.BlockCopy(package.MessageData, 0, _sendEventArgs.Buffer, 0, package.DataLength);
+                Buffer.BlockCopy(package.MessageData, 0, _pooledSendEventArgs.Buffer, 0, package.DataLength);
                 // todo: abort和这里的send会有一个race condition，目前考虑的解决办法是abort那里自旋一段时间等
                 // 当次发送完毕了再予以关闭
-                _sendEventArgs.SetBuffer(0, package.DataLength);
+                _pooledSendEventArgs.SetBuffer(0, package.DataLength);
             }
 
-            var willRaiseEvent = _socket.SendAsync(_sendEventArgs);
+            var willRaiseEvent = _socket.SendAsync(_pooledSendEventArgs);
             if (!willRaiseEvent)
             {
-                ProcessSend(_sendEventArgs);
+                ProcessSend(_pooledSendEventArgs);
             }
         }
 
@@ -325,7 +334,22 @@ namespace Incubator.SocketServer
             },
             CancellationToken.None,
             TaskCreationOptions.None,
-            _socketListener.Scheduler);
+            Scheduler);
+        }
+
+        internal byte[] GetMessageBytes(string message, out int length)
+        {
+            var body = message;
+            var body_bytes = Encoding.UTF8.GetBytes(body);
+            var head = body_bytes.Length;
+            var head_bytes = BitConverter.GetBytes(head);
+            length = head_bytes.Length + body_bytes.Length;
+            var bytes = ArrayPool<byte>.Shared.Rent(length);
+
+            Buffer.BlockCopy(head_bytes, 0, bytes, 0, head_bytes.Length);
+            Buffer.BlockCopy(body_bytes, 0, bytes, head_bytes.Length, body_bytes.Length);
+
+            return bytes;
         }
 
         protected override void Dispose(bool disposing)
@@ -337,10 +361,12 @@ namespace Incubator.SocketServer
             if (disposing)
             {
                 // 清理托管资源
-                _sendEventArgs.UserToken = null;
-                _sendEventArgs.Completed -= IO_Completed;
-                _readEventArgs.UserToken = null;
-                _readEventArgs.Completed -= IO_Completed;
+                _pooledSendEventArgs.UserToken = null;
+                _pooledSendEventArgs.Completed -= IO_Completed;
+                _pooledReadEventArgs.UserToken = null;
+                _pooledReadEventArgs.Completed -= IO_Completed;
+                _listener.SocketAsyncSendEventArgsPool.Put(_pooledSendEventArgs);
+                _listener.SocketAsyncReadEventArgsPool.Put(_pooledReadEventArgs);
             }
 
             // 清理非托管资源

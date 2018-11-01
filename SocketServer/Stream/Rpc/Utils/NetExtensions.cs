@@ -5,7 +5,7 @@ using System.IO.Compression;
 using System.Text;
 using System.Text.RegularExpressions;
 
-namespace Incubator.SocketServer.Rpc
+namespace Incubator.Network
 {
     public static class NetExtensions
     {
