@@ -15,15 +15,15 @@ namespace Incubator.Network
         bool _useCompression = false; //default is false
         IPEndPoint _endPoint;
         BaseListener _listener;
-        ConcurrentDictionary<string, int> _serviceKeys;
-        ConcurrentDictionary<int, ServiceInstance> _services;
+        internal ConcurrentDictionary<string, int> ServiceKeys;
+        internal ConcurrentDictionary<int, ServiceInstance> Services;
 
         public RpcServer(string address, int port, bool debug = false)
         {
             _debug = debug;
-            _serviceKeys = new ConcurrentDictionary<string, int>();
-            _services = new ConcurrentDictionary<int, ServiceInstance>();
-            _listener = new RpcListener(_maxConnectionCount, _bufferSize, debug);
+            ServiceKeys = new ConcurrentDictionary<string, int>();
+            Services = new ConcurrentDictionary<int, ServiceInstance>();
+            _listener = new RpcListener(_maxConnectionCount, _bufferSize, this, debug);
             _endPoint = new IPEndPoint(IPAddress.Parse(address), port);
         }
 
@@ -72,13 +72,13 @@ namespace Incubator.Network
             if (!serviceType.IsInterface)
                 throw new ArgumentException("TService must be an interface.", "TService");
             var serviceKey = serviceType.FullName;
-            if (_serviceKeys.ContainsKey(serviceKey))
+            if (ServiceKeys.ContainsKey(serviceKey))
                 throw new Exception("Service already added. Only one instance allowed.");
 
-            var keyIndex = _serviceKeys.Count;
-            _serviceKeys.TryAdd(serviceKey, keyIndex);
+            var keyIndex = ServiceKeys.Count;
+            ServiceKeys.TryAdd(serviceKey, keyIndex);
             var instance = CreateMethodMap(keyIndex, serviceType, service);
-            _services.TryAdd(keyIndex, instance);
+            Services.TryAdd(keyIndex, instance);
         }
 
         /// <summary>

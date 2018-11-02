@@ -5,21 +5,23 @@ namespace Incubator.SocketClient.Rpc
 {
     public sealed class RpcConnection : SocketClientConnection, IPooledWapper
     {
+        int _id;
+        // 对于池化的对象来说，_disposed几乎没有什么作用，因为回到池后它还会再生，dispose可没有这种语义
         bool _disposed;
         ObjectPool<IPooledWapper> _pool;
         public DateTime LastGetTime { set; get; }
-        public bool IsDisposed { get { return _disposed; } }
-        
+
         #region 事件
         public event EventHandler<Package> OnMessageReceived;
         #endregion
 
-        public RpcConnection(ObjectPool<IPooledWapper> pool, string address, int port, int bufferSize, bool debug = false)
-            : base(address, port, bufferSize, debug)
+        public RpcConnection(ObjectPool<IPooledWapper> pool, int id, string address, int port, int bufferSize, bool debug = false)
+            : base(id, address, port, bufferSize, debug)
         {
             if (pool == null)
                 throw new ArgumentNullException("pool");
 
+            _id = id;
             _pool = pool;
             _disposed = false;
         }
@@ -45,6 +47,8 @@ namespace Incubator.SocketClient.Rpc
                 // 清理托管资源
                 if (_pool.IsDisposed)
                 {
+                    // 让类型知道自己已经被释放
+                    _disposed = true;
                     base.Dispose();
                 }
                 else
@@ -54,9 +58,6 @@ namespace Incubator.SocketClient.Rpc
             }
 
             // 清理非托管资源
-
-            // 让类型知道自己已经被释放
-            _disposed = true;
         }
     }
 }

@@ -2,7 +2,6 @@
 using System;
 using System.Collections.Concurrent;
 using System.Net;
-using System.Text;
 using System.Threading.Tasks;
 
 namespace Incubator.SocketClient.Rpc
@@ -25,17 +24,16 @@ namespace Incubator.SocketClient.Rpc
         bool _debug;
         object _syncRoot;
         ServiceSyncInfo _syncInfo;
-        ObjectPool<IPooledWapper> _connectionPool;
-        ParameterTransferHelper _parameterTransferHelper;
+        ObjectPool<IPooledWapper> _connectionPool;        
         // keep cached sync info to avoid redundant wire trips
         private static ConcurrentDictionary<Type, ServiceSyncInfo> _syncInfoCache = new ConcurrentDictionary<Type, ServiceSyncInfo>();
 
         public RpcClient2(Type serviceType, IPEndPoint endPoint)
         {
+            var count = 0;
             _debug = false;
             _syncRoot = new object();
-            _parameterTransferHelper = new ParameterTransferHelper();
-            _connectionPool = new ObjectPool<IPooledWapper>(12, 4, pool => new RpcConnection2(pool, endPoint.Address.ToString(), endPoint.Port, 256, _debug));
+            _connectionPool = new ObjectPool<IPooledWapper>(12, 4, pool => new RpcConnection2(pool, ++count, endPoint.Address.ToString(), endPoint.Port, 256, _debug));
             SyncInterface(serviceType).Wait();
         }
 
@@ -46,6 +44,7 @@ namespace Incubator.SocketClient.Rpc
                 using (var conn = (RpcConnection2)_connectionPool.Get())
                 {
                     conn.Connect();
+
                     await conn.Write((int)MessageType.SyncInterface);
 
                     await conn.Write(serviceType.FullName);
@@ -56,6 +55,12 @@ namespace Incubator.SocketClient.Rpc
                     _syncInfoCache.AddOrUpdate(serviceType, _syncInfo, (t, info) => _syncInfo);
                 }
             }
+        }
+
+        public long AddMoney(long a, long b)
+        {
+            var ss = InvokeMethod("AddMoney|System.Int64|System.Int64", new object[] { a, b });
+            return (long)ss.Result[0];
         }
 
         public async Task<object[]> InvokeMethod(string metaData, params object[] parameters)
@@ -94,7 +99,7 @@ namespace Incubator.SocketClient.Rpc
 
             if (ident < 0)
                 throw new Exception(string.Format("Cannot match method '{0}' to its server side equivalent", mdata[0]));
-
+            
             using (var conn = (RpcConnection2)_connectionPool.Get())
             {
                 conn.Connect();

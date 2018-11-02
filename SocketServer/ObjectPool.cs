@@ -8,7 +8,6 @@ namespace Incubator.Network
     public interface IPooledWapper : IDisposable
     {
         DateTime LastGetTime { set; get; }
-        bool IsDisposed { get; }
     }
 
     public sealed class ObjectPool<T> : IDisposable where T : IPooledWapper

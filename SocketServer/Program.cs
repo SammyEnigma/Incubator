@@ -6,7 +6,7 @@ namespace Incubator.SocketClient
 {
     public class DataContractImpl : IDataContract
     {
-        public int AddMoney(int input1, int input2)
+        public long AddMoney(long input1, long input2)
         {
             return input1 + input2;
         }

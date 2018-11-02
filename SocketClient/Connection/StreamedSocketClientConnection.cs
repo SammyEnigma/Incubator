@@ -9,17 +9,21 @@ namespace Incubator.SocketClient
 {
     public class StreamedSocketClientConnection : StreamedSocketConnection
     {
+        int _id;
         bool _debug;
         bool _disposed;
+        bool _connected;
         int _bufferSize;
         int _connectTimeout; // 单位毫秒
         IPEndPoint _remoteEndPoint;
 
-        public StreamedSocketClientConnection(string address, int port, int bufferSize, bool debug = false)
-            : base(1, new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp), debug)
+        public StreamedSocketClientConnection(int id, string address, int port, int bufferSize, bool debug = false)
+            : base(id, new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp), debug)
         {
+            _id = id;
             _debug = debug;
             _disposed = false;
+            _connected = false;
             _bufferSize = bufferSize;
             _connectTimeout = 5 * 1000;
             _remoteEndPoint = new IPEndPoint(IPAddress.Parse(address), port);
@@ -40,21 +44,23 @@ namespace Incubator.SocketClient
 
         public void Connect()
         {
-            var connected = false;
+            if (_connected)
+                return;
+
             var connectEventArgs = new SocketAsyncEventArgs
             {
                 RemoteEndPoint = _remoteEndPoint
             };
             connectEventArgs.Completed += (sender, e) =>
             {
-                connected = true;
+                _connected = true;
             };
 
             if (_socket.ConnectAsync(connectEventArgs))
             {
-                while (!connected)
+                while (!_connected)
                 {
-                    if (!SpinWait.SpinUntil(() => connected, _connectTimeout))
+                    if (!SpinWait.SpinUntil(() => _connected, _connectTimeout))
                     {
                         throw new TimeoutException("Unable to connect within " + _connectTimeout + "ms");
                     }

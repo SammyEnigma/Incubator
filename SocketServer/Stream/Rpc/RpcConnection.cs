@@ -23,15 +23,13 @@ namespace Incubator.Network
 
         bool _disposed;
         RpcListener _listener;
-        ConcurrentDictionary<string, int> _serviceKeys;
-        ConcurrentDictionary<int, ServiceInstance> _services;        
+        RpcServer _server;
 
-        public RpcConnection(int id, Socket socket, RpcListener listener, bool debug)
+        public RpcConnection(int id, RpcServer server, Socket socket, RpcListener listener, bool debug)
             : base(id, socket, debug)
         {
             _listener = listener;
-            _serviceKeys = new ConcurrentDictionary<string, int>();
-            _services = new ConcurrentDictionary<int, ServiceInstance>();
+            _server = server;
 
             _readEventArgs = _listener.SocketAsyncReadEventArgsPool.Get() as PooledSocketAsyncEventArgs;
             _sendEventArgs = _listener.SocketAsyncSendEventArgsPool.Get() as PooledSocketAsyncEventArgs;
@@ -61,10 +59,10 @@ namespace Incubator.Network
         {
             var serviceKey = 0;
             var serviceTypeName = await ReadString();
-            if (_serviceKeys.TryGetValue(serviceTypeName, out serviceKey))
+            if (_server.ServiceKeys.TryGetValue(serviceTypeName, out serviceKey))
             {
                 ServiceInstance instance;
-                if (_services.TryGetValue(serviceKey, out instance))
+                if (_server.Services.TryGetValue(serviceKey, out instance))
                 {
                     await Write(instance.ServiceSyncInfo);
                 }
@@ -83,7 +81,7 @@ namespace Incubator.Network
             var obj = await ReadObject<InvokeInfo>();
 
             ServiceInstance invokedInstance;
-            if (_services.TryGetValue(obj.InvokedServiceKey, out invokedInstance))
+            if ( _server.Services.TryGetValue(obj.InvokedServiceKey, out invokedInstance))
             {
                 cat = invokedInstance.InterfaceType.Name;
                 //read the method identifier

@@ -43,12 +43,13 @@ namespace Incubator.SocketClient.Rpc
 
         public RpcClient(Type serviceType, IPEndPoint endPoint)
         {
+            var count = 0;
             _debug = false;
             _syncRoot = new object();
             _stream = new MemoryStream();
             _binWriter = new BinaryWriter(_stream, Encoding.UTF8);
             _parameterTransferHelper = new ParameterTransferHelper();
-            _connectionPool = new ObjectPool<IPooledWapper>(12, 4, pool => new RpcConnection(pool, endPoint.Address.ToString(), endPoint.Port, 256, _debug));
+            _connectionPool = new ObjectPool<IPooledWapper>(12, 4, pool => new RpcConnection(pool, ++count, endPoint.Address.ToString(), endPoint.Port, 256, _debug));
             SyncInterface(serviceType);
         }
 
@@ -67,6 +68,7 @@ namespace Incubator.SocketClient.Rpc
                     ((IDisposable)sender).Dispose();
                     System.Threading.Interlocked.Exchange(ref _synced, 1);
                 };
+
                 conn.Connect();
                 _binWriter.Write((int)MessageType.SyncInterface);
                 _binWriter.Write(serviceType.FullName);
@@ -142,6 +144,7 @@ namespace Incubator.SocketClient.Rpc
                         System.Threading.Interlocked.Exchange(ref _received, 1);
                     }
                 };
+
                 conn.Connect();
                 // write the message type
                 _binWriter.Write((int)MessageType.MethodInvocation);

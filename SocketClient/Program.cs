@@ -18,6 +18,10 @@ namespace Incubator.SocketClient
 
             var proxy = TcpProxy.CreateProxy<IDataContract>(new IPEndPoint(IPAddress.Parse("127.0.0.1"), 5000));
             var s = proxy.AddMoney(1, 2);
+            //var client = new RpcClient2(typeof(IDataContract), new IPEndPoint(IPAddress.Parse("127.0.0.1"), 5000));
+            //client.SyncInterface(typeof(IDataContract)).Wait();
+            //var s = client.AddMoney(1, 2);
+
             Console.WriteLine(s);
 
             Console.Read();
