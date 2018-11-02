@@ -57,13 +57,7 @@ namespace Incubator.SocketClient.Rpc
             }
         }
 
-        public long AddMoney(long a, long b)
-        {
-            var ss = InvokeMethod("AddMoney|System.Int64|System.Int64", new object[] { a, b });
-            return (long)ss.Result[0];
-        }
-
-        public async Task<object[]> InvokeMethod(string metaData, params object[] parameters)
+        public object[] InvokeMethod(string metaData, params object[] parameters)
         {
             //prevent call to invoke method on more than one thread at a time
             var mdata = metaData.Split('|');
@@ -105,7 +99,7 @@ namespace Incubator.SocketClient.Rpc
                 conn.Connect();
 
                 // write the message type
-                await conn.Write((int)MessageType.MethodInvocation);
+                conn.Write((int)MessageType.MethodInvocation).Wait();
 
                 var invoke_info = new InvokeInfo
                 {
@@ -113,10 +107,10 @@ namespace Incubator.SocketClient.Rpc
                     MethodHashCode = ident,
                     Parameters = parameters
                 };
-                await conn.Write(invoke_info);
+                conn.Write(invoke_info).Wait();
 
                 // Read the result of the invocation.
-                var retObj = await conn.ReadObject<InvokeReturn>();
+                var retObj = conn.ReadObject<InvokeReturn>().Result;
                 if (retObj.ReturnMessageType == (int)MessageType.UnknownMethod)
                     throw new Exception("Unknown method.");
                 if (retObj.ReturnMessageType == (int)MessageType.ThrowException)
