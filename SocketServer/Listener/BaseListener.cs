@@ -59,6 +59,7 @@ namespace Incubator.Network
             _bufferSize = bufferSize;
             _maxConnectionCount = maxConnectionCount;
             _shutdownEvent = new ManualResetEventSlim(false);
+            _acceptedClientsSemaphore = new SemaphoreSlim(maxConnectionCount, maxConnectionCount);
             ConnectionList = new ConcurrentDictionary<int, BaseConnection>();
 
             SocketAsyncSendEventArgsPool = new ObjectPool<IPooledWapper>(maxConnectionCount, 12, (pool) =>

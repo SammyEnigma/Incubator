@@ -1,7 +1,8 @@
-﻿using Incubator.RpcContract;
+﻿using Incubator.Network;
+using Incubator.RpcContract;
 using System;
 
-namespace Incubator.Network
+namespace Incubator.SocketClient
 {
     public class DataContractImpl : IDataContract
     {

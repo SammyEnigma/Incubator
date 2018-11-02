@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Buffers;
 using System.Net.Sockets;
+using System.Text;
 using System.Threading.Tasks;
 
 namespace Incubator.Network
@@ -8,7 +9,6 @@ namespace Incubator.Network
     public abstract class StreamedSocketConnection : BaseConnection
     {
         bool _disposed;
-        int _position;
         byte[] _largebuffer;
 
         protected SocketAsyncEventArgs _readEventArgs;
@@ -20,7 +20,6 @@ namespace Incubator.Network
             : base(id, socket, debug)
         {
             _disposed = false;
-            _position = 0;
         }
 
         ~StreamedSocketConnection()
@@ -43,7 +42,6 @@ namespace Incubator.Network
                 }
             }
             while ((read += _readEventArgs.BytesTransferred) < count);
-            _position = read;
         }
 
         private async Task FillLargeBuffer(int count)
@@ -89,8 +87,24 @@ namespace Incubator.Network
             else
             {
                 await FillBuffer(count);
-                return new ArraySegment<byte>(_readEventArgs.Buffer, _position, count);
+                return new ArraySegment<byte>(_readEventArgs.Buffer, 0, count);
             }
+        }
+
+        public async Task<string> ReadString()
+        {
+            var length = await ReadInt32();
+            var bytes = await ReadBytes(length);
+
+            return Encoding.UTF8.GetString(bytes);
+        }
+
+        public async Task<T> ReadObject<T>()
+        {
+            var length = await ReadInt32();
+            var bytes = await ReadBytes(length);
+
+            return bytes.Array.ToDeserializedObject<T>();
         }
 
         public async Task Write(byte[] buffer, int offset, int count, bool rentFromPool)
@@ -196,6 +210,35 @@ namespace Incubator.Network
         public async Task Write(decimal value)
         {
             throw new NotImplementedException();
+        }
+
+        public async Task Write(string value)
+        {
+            var body = value;
+            var body_bytes = Encoding.UTF8.GetBytes(body);
+            var head = body_bytes.Length;
+            var head_bytes = BitConverter.GetBytes(head);
+            var length = head_bytes.Length + body_bytes.Length;
+            var bytes = ArrayPool<byte>.Shared.Rent(length);
+
+            Buffer.BlockCopy(head_bytes, 0, bytes, 0, head_bytes.Length);
+            Buffer.BlockCopy(body_bytes, 0, bytes, head_bytes.Length, body_bytes.Length);
+
+            await Write(bytes, 0, bytes.Length, true);
+        }
+
+        public async Task Write(object value)
+        {
+            var body_bytes = value.ToSerializedBytes();
+            var head = body_bytes.Length;
+            var head_bytes = BitConverter.GetBytes(head);
+            var length = head_bytes.Length + body_bytes.Length;
+            var bytes = ArrayPool<byte>.Shared.Rent(length);
+
+            Buffer.BlockCopy(head_bytes, 0, bytes, 0, head_bytes.Length);
+            Buffer.BlockCopy(body_bytes, 0, bytes, head_bytes.Length, body_bytes.Length);
+
+            await Write(bytes, 0, bytes.Length, true);
         }
     }
 }

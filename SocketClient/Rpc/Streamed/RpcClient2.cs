@@ -43,15 +43,16 @@ namespace Incubator.SocketClient.Rpc
         {
             if (!_syncInfoCache.TryGetValue(serviceType, out _syncInfo))
             {
-                using (var conn = ((RpcConnection2)_connectionPool.Get()))
+                using (var conn = (RpcConnection2)_connectionPool.Get())
                 {
-                    var msg = Encoding.UTF8.GetBytes(serviceType.FullName);
-                    await conn.Write(msg, 0, msg.Length, false);
+                    conn.Connect();
+                    await conn.Write((int)MessageType.SyncInterface);
 
-                    var len = await conn.ReadInt32();
-                    if (len == 0) throw new TypeAccessException("SyncInterface failed. Type or version of type unknown.");
-                    var bytes = await conn.ReadBytes(len);
-                    _syncInfo = bytes.Array.ToDeserializedObject<ServiceSyncInfo>();
+                    await conn.Write(serviceType.FullName);
+
+                    _syncInfo = await conn.ReadObject<ServiceSyncInfo>();
+                    if (_syncInfo.ServiceKeyIndex == -1)
+                        throw new TypeAccessException("SyncInterface failed. Type or version of type unknown.");
                     _syncInfoCache.AddOrUpdate(serviceType, _syncInfo, (t, info) => _syncInfo);
                 }
             }
@@ -94,8 +95,10 @@ namespace Incubator.SocketClient.Rpc
             if (ident < 0)
                 throw new Exception(string.Format("Cannot match method '{0}' to its server side equivalent", mdata[0]));
 
-            using (var conn = ((RpcConnection2)_connectionPool.Get()))
+            using (var conn = (RpcConnection2)_connectionPool.Get())
             {
+                conn.Connect();
+
                 // write the message type
                 await conn.Write((int)MessageType.MethodInvocation);
 
@@ -105,20 +108,16 @@ namespace Incubator.SocketClient.Rpc
                     MethodHashCode = ident,
                     Parameters = parameters
                 };
-                var bytes = invoke_info.ToSerializedBytes();
-                await conn.Write(bytes, 0, bytes.Length, false);
+                await conn.Write(invoke_info);
 
                 // Read the result of the invocation.
-                MessageType messageType = (MessageType)await conn.ReadInt32();
-                if (messageType == MessageType.UnknownMethod)
+                var retObj = await conn.ReadObject<InvokeReturn>();
+                if (retObj.ReturnMessageType == (int)MessageType.UnknownMethod)
                     throw new Exception("Unknown method.");
+                if (retObj.ReturnMessageType == (int)MessageType.ThrowException)
+                    throw (Exception)retObj.ReturnParameters[0];
 
-                var retBytes = await conn.ReadBytes(1);
-                var retObj = retBytes.Array.ToDeserializedObject<InvokeReturn>();
                 object[] outParams = retObj.ReturnParameters;
-                if (messageType == MessageType.ThrowException)
-                    throw (Exception)outParams[0];
-
                 return outParams;
             }
         }

@@ -17,14 +17,12 @@ namespace Incubator.Network
         BaseListener _listener;
         ConcurrentDictionary<string, int> _serviceKeys;
         ConcurrentDictionary<int, ServiceInstance> _services;
-        ParameterTransferHelper _parameterTransferHelper;
 
         public RpcServer(string address, int port, bool debug = false)
         {
             _debug = debug;
             _serviceKeys = new ConcurrentDictionary<string, int>();
             _services = new ConcurrentDictionary<int, ServiceInstance>();
-            _parameterTransferHelper = new ParameterTransferHelper();
             _listener = new RpcListener(_maxConnectionCount, _bufferSize, debug);
             _endPoint = new IPEndPoint(IPAddress.Parse(address), port);
         }

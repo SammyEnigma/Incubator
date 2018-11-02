@@ -24,8 +24,7 @@ namespace Incubator.Network
         bool _disposed;
         RpcListener _listener;
         ConcurrentDictionary<string, int> _serviceKeys;
-        ConcurrentDictionary<int, ServiceInstance> _services;
-        ParameterTransferHelper _parameterTransferHelper;
+        ConcurrentDictionary<int, ServiceInstance> _services;        
 
         public RpcConnection(int id, Socket socket, RpcListener listener, bool debug)
             : base(id, socket, debug)
@@ -33,7 +32,6 @@ namespace Incubator.Network
             _listener = listener;
             _serviceKeys = new ConcurrentDictionary<string, int>();
             _services = new ConcurrentDictionary<int, ServiceInstance>();
-            _parameterTransferHelper = new ParameterTransferHelper();
 
             _readEventArgs = _listener.SocketAsyncReadEventArgsPool.Get() as PooledSocketAsyncEventArgs;
             _sendEventArgs = _listener.SocketAsyncSendEventArgsPool.Get() as PooledSocketAsyncEventArgs;
@@ -62,20 +60,18 @@ namespace Incubator.Network
         private async Task ProcessSync()
         {
             var serviceKey = 0;
-            var serviceTypeName = string.Empty;
+            var serviceTypeName = await ReadString();
             if (_serviceKeys.TryGetValue(serviceTypeName, out serviceKey))
             {
                 ServiceInstance instance;
                 if (_services.TryGetValue(serviceKey, out instance))
                 {
-                    //Create a list of sync infos from the dictionary
-                    var syncBytes = instance.ServiceSyncInfo.ToSerializedBytes();
-                    await Write(syncBytes, 0, syncBytes.Length, false);
+                    await Write(instance.ServiceSyncInfo);
                 }
             }
             else
             {
-                await Write(0);
+                await Write(new ServiceSyncInfo { ServiceKeyIndex = -1 });
             }
         }
 
@@ -84,9 +80,7 @@ namespace Incubator.Network
             //read service instance key
             var cat = "unknown";
             var stat = "MethodInvocation";
-            var body_length = await ReadInt32();
-            var body = await ReadBytes(body_length);
-            var obj = body.Array.ToDeserializedObject<InvokeInfo>();
+            var obj = await ReadObject<InvokeInfo>();
 
             ServiceInstance invokedInstance;
             if (_services.TryGetValue(obj.InvokedServiceKey, out invokedInstance))
@@ -131,16 +125,14 @@ namespace Incubator.Network
                         ReturnParameters = returnParameters
                     };
                     //send the result back to the client
-                    // (1) write the message type
                     // (2) write the return parameters
-                    var retBytes = returnObj.ToSerializedBytes();
-                    await Write(retBytes, 0, retBytes.Length, false);
+                    await Write(returnObj);
                 }
                 else
-                    await Write((int)MessageType.UnknownMethod);
+                    await Write(new InvokeReturn { ReturnMessageType = (int)MessageType.UnknownMethod });
             }
             else
-                await Write((int)MessageType.UnknownMethod);
+                await Write(new InvokeReturn { ReturnMessageType = (int)MessageType.UnknownMethod });
         }
 
         protected override void Dispose(bool disposing)
