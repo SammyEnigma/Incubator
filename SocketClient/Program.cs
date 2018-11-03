@@ -18,6 +18,9 @@ namespace Incubator.SocketClient
 
             var proxy = TcpProxy.CreateProxy<IDataContract>(new IPEndPoint(IPAddress.Parse("127.0.0.1"), 5000));
             var s = proxy.AddMoney(1, 2);
+            Console.WriteLine(proxy.AddMoney(1, 2));
+            Console.WriteLine(proxy.AddMoney(1, 2));
+            Console.WriteLine(proxy.AddMoney(1, 2));
             Console.WriteLine(s);
 
             Console.Read();

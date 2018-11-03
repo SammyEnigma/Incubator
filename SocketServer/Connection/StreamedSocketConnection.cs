@@ -27,50 +27,6 @@ namespace Incubator.Network
             Dispose(false);
         }
 
-        private async Task FillBuffer(int count)
-        {
-            var read = 0;
-            do
-            {
-                _readEventArgs.SetBuffer(read, count - read);
-                await _socket.ReceiveAsync(_readAwait);
-                if (_readEventArgs.BytesTransferred == 0)
-                {
-                    // FIN here
-                    // todo: 添加处理逻辑
-                    break;
-                }
-            }
-            while ((read += _readEventArgs.BytesTransferred) < count);
-        }
-
-        private async Task FillLargeBuffer(int count)
-        {
-            var read = 0;
-            ReleaseLargeBuffer();
-            _largebuffer = ArrayPool<byte>.Shared.Rent(count);
-            do
-            {
-                await _socket.ReceiveAsync(_readAwait);
-                if (_readEventArgs.BytesTransferred == 0)
-                {
-                    // FIN here
-                    break;
-                }
-                Buffer.BlockCopy(_readEventArgs.Buffer, 0, _largebuffer, read, _readEventArgs.BytesTransferred);
-            }
-            while ((read += _readEventArgs.BytesTransferred) < count);
-        }
-
-        private void ReleaseLargeBuffer()
-        {
-            if (_largebuffer != null)
-            {
-                ArrayPool<byte>.Shared.Return(_largebuffer, true);
-                _largebuffer = null;
-            }
-        }
-
         public async Task<int> ReadInt32()
         {
             await FillBuffer(4);
@@ -110,10 +66,13 @@ namespace Incubator.Network
         public async Task Write(byte[] buffer, int offset, int count, bool rentFromPool)
         {
             var sent = 0;
+            var need = 0;
             var remain = count;
             while (remain > 0)
             {
-                Buffer.BlockCopy(buffer, offset + sent, _sendEventArgs.Buffer, 0, remain > _sendEventArgs.Buffer.Length ? _sendEventArgs.Buffer.Length : remain);
+                need = remain > _sendEventArgs.Buffer.Length ? _sendEventArgs.Buffer.Length : remain;
+                _sendEventArgs.SetBuffer(0, need);
+                Buffer.BlockCopy(buffer, offset + sent, _sendEventArgs.Buffer, 0, need);
                 await _socket.SendAsync(_sendAwait);
                 sent += _sendEventArgs.BytesTransferred;
                 remain -= _sendEventArgs.BytesTransferred;
@@ -137,19 +96,6 @@ namespace Incubator.Network
             _sendEventArgs.SetBuffer(0, 1);
             _sendEventArgs.Buffer[0] = value;
             await _socket.SendAsync(_sendAwait);
-        }
-
-        private unsafe void UnsafeDoubleBytes(double value)
-        {
-            ulong TmpValue = *(ulong*)&value;
-            _sendEventArgs.Buffer[0] = (byte)TmpValue;
-            _sendEventArgs.Buffer[1] = (byte)(TmpValue >> 8);
-            _sendEventArgs.Buffer[2] = (byte)(TmpValue >> 16);
-            _sendEventArgs.Buffer[3] = (byte)(TmpValue >> 24);
-            _sendEventArgs.Buffer[4] = (byte)(TmpValue >> 32);
-            _sendEventArgs.Buffer[5] = (byte)(TmpValue >> 40);
-            _sendEventArgs.Buffer[6] = (byte)(TmpValue >> 48);
-            _sendEventArgs.Buffer[7] = (byte)(TmpValue >> 56);
         }
 
         public async Task Write(double value)
@@ -191,15 +137,6 @@ namespace Incubator.Network
             await _socket.SendAsync(_sendAwait);
         }
 
-        private unsafe void UnsafeFloatBytes(float value)
-        {
-            uint TmpValue = *(uint*)&value;
-            _sendEventArgs.Buffer[0] = (byte)TmpValue;
-            _sendEventArgs.Buffer[1] = (byte)(TmpValue >> 8);
-            _sendEventArgs.Buffer[2] = (byte)(TmpValue >> 16);
-            _sendEventArgs.Buffer[3] = (byte)(TmpValue >> 24);
-        }
-
         public async Task Write(float value)
         {
             _sendEventArgs.SetBuffer(0, 1);
@@ -214,31 +151,120 @@ namespace Incubator.Network
 
         public async Task Write(string value)
         {
-            var body = value;
-            var body_bytes = Encoding.UTF8.GetBytes(body);
-            var head = body_bytes.Length;
-            var head_bytes = BitConverter.GetBytes(head);
-            var length = head_bytes.Length + body_bytes.Length;
-            var bytes = ArrayPool<byte>.Shared.Rent(length);
+            var body_bytes = Encoding.UTF8.GetBytes(value);
+            var length = 0;
+            var bytes = CalcBytes(body_bytes, out length);
 
-            Buffer.BlockCopy(head_bytes, 0, bytes, 0, head_bytes.Length);
-            Buffer.BlockCopy(body_bytes, 0, bytes, head_bytes.Length, body_bytes.Length);
-
-            await Write(bytes, 0, bytes.Length, true);
+            await Write(bytes, 0, length, true);
         }
 
         public async Task Write(object value)
         {
             var body_bytes = value.ToSerializedBytes();
+            var length = 0;
+            var bytes = CalcBytes(body_bytes, out length);
+
+            await Write(bytes, 0, length, true);
+        }
+
+        private byte[] CalcBytes(byte[] body_bytes, out int length)
+        {
             var head = body_bytes.Length;
             var head_bytes = BitConverter.GetBytes(head);
-            var length = head_bytes.Length + body_bytes.Length;
+            length = head_bytes.Length + body_bytes.Length;
             var bytes = ArrayPool<byte>.Shared.Rent(length);
 
             Buffer.BlockCopy(head_bytes, 0, bytes, 0, head_bytes.Length);
             Buffer.BlockCopy(body_bytes, 0, bytes, head_bytes.Length, body_bytes.Length);
 
-            await Write(bytes, 0, bytes.Length, true);
+            return bytes;
+        }
+
+        private async Task FillBuffer(int count)
+        {
+            var read = 0;
+            do
+            {
+                _readEventArgs.SetBuffer(read, count - read);
+                await _socket.ReceiveAsync(_readAwait);
+                if (_readEventArgs.BytesTransferred == 0)
+                {
+                    // FIN here
+                    // todo: 添加处理逻辑
+                    break;
+                }
+            }
+            while ((read += _readEventArgs.BytesTransferred) < count);
+        }
+
+        private async Task FillLargeBuffer(int count)
+        {
+            ReleaseLargeBuffer();
+            _largebuffer = ArrayPool<byte>.Shared.Rent(count);
+            _readEventArgs.SetBuffer(0, _readEventArgs.Buffer.Length);
+            var read = 0;
+            do
+            {
+                await _socket.ReceiveAsync(_readAwait);
+                if (_readEventArgs.BytesTransferred == 0)
+                {
+                    // FIN here
+                    // todo: 添加处理逻辑
+                    break;
+                }
+                Buffer.BlockCopy(_readEventArgs.Buffer, 0, _largebuffer, read, _readEventArgs.BytesTransferred);
+            }
+            while ((read += _readEventArgs.BytesTransferred) < count);
+        }
+
+        private unsafe void UnsafeDoubleBytes(double value)
+        {
+            ulong TmpValue = *(ulong*)&value;
+            _sendEventArgs.Buffer[0] = (byte)TmpValue;
+            _sendEventArgs.Buffer[1] = (byte)(TmpValue >> 8);
+            _sendEventArgs.Buffer[2] = (byte)(TmpValue >> 16);
+            _sendEventArgs.Buffer[3] = (byte)(TmpValue >> 24);
+            _sendEventArgs.Buffer[4] = (byte)(TmpValue >> 32);
+            _sendEventArgs.Buffer[5] = (byte)(TmpValue >> 40);
+            _sendEventArgs.Buffer[6] = (byte)(TmpValue >> 48);
+            _sendEventArgs.Buffer[7] = (byte)(TmpValue >> 56);
+        }
+
+        private unsafe void UnsafeFloatBytes(float value)
+        {
+            uint TmpValue = *(uint*)&value;
+            _sendEventArgs.Buffer[0] = (byte)TmpValue;
+            _sendEventArgs.Buffer[1] = (byte)(TmpValue >> 8);
+            _sendEventArgs.Buffer[2] = (byte)(TmpValue >> 16);
+            _sendEventArgs.Buffer[3] = (byte)(TmpValue >> 24);
+        }
+
+        private void ReleaseLargeBuffer()
+        {
+            if (_largebuffer != null)
+            {
+                ArrayPool<byte>.Shared.Return(_largebuffer, true);
+                _largebuffer = null;
+            }
+        }
+
+        protected override void Dispose(bool disposing)
+        {
+            if (_disposed)
+            {
+                return;
+            }
+            if (disposing)
+            {
+                // 清理托管资源
+                ReleaseLargeBuffer();
+            }
+
+            // 清理非托管资源
+
+            // 让类型知道自己已经被释放
+            _disposed = true;
+            base.Dispose();
         }
     }
 }
