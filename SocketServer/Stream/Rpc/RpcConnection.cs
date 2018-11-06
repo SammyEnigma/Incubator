@@ -1,26 +1,11 @@
 ﻿using System;
-using System.Collections.Concurrent;
 using System.Net.Sockets;
-using System.Reflection;
 using System.Threading.Tasks;
 
 namespace Incubator.Network
 {
     public sealed class RpcConnection : StreamedSocketConnection
     {
-        class InvokeInfo
-        {
-            public int InvokedServiceKey;
-            public int MethodHashCode;
-            public object[] Parameters;
-        }
-
-        class InvokeReturn
-        {
-            public int ReturnMessageType;
-            public object[] ReturnParameters;
-        }
-
         bool _disposed;
         RpcListener _listener;
         RpcServer _server;
@@ -42,95 +27,50 @@ namespace Incubator.Network
         {
             while (true)
             {
-                var messageType = (MessageType)await ReadInt32();
-                switch (messageType)
-                {
-                    case MessageType.SyncInterface:
-                        await ProcessSync();
-                        break;
-                    case MessageType.MethodInvocation:
-                        await ProcessInvocation();
-                        break;
-                }
-            }
-        }
-
-        private async Task ProcessSync()
-        {
-            var serviceKey = 0;
-            var serviceTypeName = await ReadString();
-            if (_server.ServiceKeys.TryGetValue(serviceTypeName, out serviceKey))
-            {
-                ServiceInstance instance;
-                if (_server.Services.TryGetValue(serviceKey, out instance))
-                {
-                    await Write(instance.ServiceSyncInfo);
-                }
-            }
-            else
-            {
-                await Write(new ServiceSyncInfo { ServiceKeyIndex = -1 });
+                await ProcessInvocation();
             }
         }
 
         private async Task ProcessInvocation()
         {
-            //read service instance key
-            var cat = "unknown";
-            var stat = "MethodInvocation";
+            // 读取调用信息
             var obj = await ReadObject<InvokeInfo>();
 
-            ServiceInstance invokedInstance;
-            if ( _server.Services.TryGetValue(obj.InvokedServiceKey, out invokedInstance))
+            // 准备调用方法
+            ServiceInfo invokedInstance;
+            if ( _server.Services.TryGetValue(obj.ServiceHash, out invokedInstance))
             {
-                cat = invokedInstance.InterfaceType.Name;
-                //read the method identifier
-                int methodHashCode = obj.MethodHashCode;
-                if (invokedInstance.InterfaceMethods.ContainsKey(methodHashCode))
+                int index = obj.MethodIndex; 
+                object[] parameters = obj.Parameters;
+
+                //invoke the method
+                object[] returnParameters;
+                var returnMessageType = MessageType.ReturnValues;
+                try
                 {
-                    MethodInfo method;
-                    invokedInstance.InterfaceMethods.TryGetValue(methodHashCode, out method);
-                    stat = method.Name;
-
-                    bool[] isByRef;
-                    invokedInstance.MethodParametersByRef.TryGetValue(methodHashCode, out isByRef);
-
-                    //read parameter data
-                    object[] parameters = obj.Parameters;
-
-                    //invoke the method
-                    object[] returnParameters;
-                    var returnMessageType = MessageType.ReturnValues;
-                    try
-                    {
-                        object returnValue = method.Invoke(invokedInstance.SingletonInstance, parameters);
-                        //the result to the client is the return value (null if void) and the input parameters
-                        returnParameters = new object[1 + parameters.Length];
-                        returnParameters[0] = returnValue;
-                        for (int i = 0; i < parameters.Length; i++)
-                            returnParameters[i + 1] = isByRef[i] ? parameters[i] : null;
-                    }
-                    catch (Exception ex)
-                    {
-                        //an exception was caught. Rethrow it client side
-                        returnParameters = new object[] { ex };
-                        returnMessageType = MessageType.ThrowException;
-                    }
-
-                    var returnObj = new InvokeReturn
-                    {
-                        ReturnMessageType = (int)returnMessageType,
-                        ReturnParameters = returnParameters
-                    };
-                    //send the result back to the client
-                    // (2) write the return parameters
-                    await Write(returnObj);
+                    object returnValue = invokedInstance.Methods[index].Invoke(invokedInstance.Instance, parameters);
+                    //the result to the client is the return value (null if void) and the input parameters
+                    returnParameters = new object[1 + parameters.Length];
+                    returnParameters[0] = returnValue;
                 }
-                else
-                    await Write(new InvokeReturn { ReturnMessageType = (int)MessageType.UnknownMethod });
+                catch (Exception ex)
+                {
+                    //an exception was caught. Rethrow it client side
+                    returnParameters = new object[] { ex };
+                    returnMessageType = MessageType.ThrowException;
+                }
+
+                var returnObj = new InvokeReturn
+                {
+                    ReturnType = (int)returnMessageType,
+                    ReturnParameters = returnParameters
+                };
+                //send the result back to the client
+                // (2) write the return parameters
+                await Write(returnObj);
             }
             else
-                await Write(new InvokeReturn { ReturnMessageType = (int)MessageType.UnknownMethod });
+                await Write(new InvokeReturn { ReturnType = (int)MessageType.UnknownMethod });
         }
 
         protected override void Dispose(bool disposing)

@@ -1,30 +1,45 @@
 ﻿using System;
-using System.Collections.Concurrent;
 using System.Collections.Generic;
+using System.Linq;
 using System.Net;
 using System.Reflection;
 
 namespace Incubator.Network
 {
+    public class ServiceInfo
+    {
+        public object Instance;
+        public Dictionary<int, MethodInfo> Methods;
+    }
+
+    public class InvokeInfo
+    {
+        public ulong ServiceHash;
+        public int MethodIndex;
+        public object[] Parameters;
+    }
+
+    public class InvokeReturn
+    {
+        public int ReturnType;
+        public object[] ReturnParameters;
+    }
+
     public class RpcServer 
     {
         bool _debug;
         int _bufferSize = 512;
         int _maxConnectionCount = 500;
-        int _compressionThreshold = 131072; //128KB
-        bool _useCompression = false; //default is false
         IPEndPoint _endPoint;
         BaseListener _listener;
-        internal ConcurrentDictionary<string, int> ServiceKeys;
-        internal ConcurrentDictionary<int, ServiceInstance> Services;
+        internal Dictionary<ulong, ServiceInfo> Services;
 
         public RpcServer(string address, int port, bool debug = false)
         {
             _debug = debug;
-            ServiceKeys = new ConcurrentDictionary<string, int>();
-            Services = new ConcurrentDictionary<int, ServiceInstance>();
             _listener = new RpcListener(_maxConnectionCount, _bufferSize, this, debug);
             _endPoint = new IPEndPoint(IPAddress.Parse(address), port);
+            Services = new Dictionary<ulong, ServiceInfo>();
         }
 
         public void Start()
@@ -71,88 +86,40 @@ namespace Incubator.Network
             var serviceType = typeof(TService);
             if (!serviceType.IsInterface)
                 throw new ArgumentException("TService must be an interface.", "TService");
-            var serviceKey = serviceType.FullName;
-            if (ServiceKeys.ContainsKey(serviceKey))
+            var serviceKey = CalculateHash(serviceType.FullName);
+            if (Services.ContainsKey(serviceKey))
                 throw new Exception("Service already added. Only one instance allowed.");
 
-            var keyIndex = ServiceKeys.Count;
-            ServiceKeys.TryAdd(serviceKey, keyIndex);
-            var instance = CreateMethodMap(keyIndex, serviceType, service);
-            Services.TryAdd(keyIndex, instance);
+            var methods = CreateMethodMap(serviceType);
+            var value = new ServiceInfo { Instance = service, Methods = methods };
+            Services.Add(serviceKey, value);
         }
 
-        /// <summary>
-        /// Loads all methods from interfaces and assigns an identifier
-        /// to each. These are later synchronized with the client.
-        /// </summary>
-        private ServiceInstance CreateMethodMap(int keyIndex, Type serviceType, object service)
+        private Dictionary<int, MethodInfo> CreateMethodMap(Type serviceType)
         {
-            var instance = new ServiceInstance()
-            {
-                KeyIndex = keyIndex,
-                InterfaceType = serviceType,
-                InterfaceMethods = new ConcurrentDictionary<int, MethodInfo>(),
-                MethodParametersByRef = new ConcurrentDictionary<int, bool[]>(),
-                SingletonInstance = service
-            };
+            var ret = new Dictionary<int, MethodInfo>();
+            var methods = serviceType
+               .GetMethods(BindingFlags.Instance | BindingFlags.Public)
+               .OrderBy(p => (p.Name + "|" + string.Join("|", p.GetParameters().Select(k => k.ParameterType.Name))));
 
-            var currentMethodIdent = 0;
-            if (serviceType.IsInterface)
+            var index = 0;
+            foreach (var item in methods)
             {
-                var methodInfos = serviceType.GetMethods();
-                foreach (var mi in methodInfos)
-                {
-                    instance.InterfaceMethods.TryAdd(currentMethodIdent, mi);
-                    var parameterInfos = mi.GetParameters();
-                    var isByRef = new bool[parameterInfos.Length];
-                    for (int i = 0; i < isByRef.Length; i++)
-                        isByRef[i] = parameterInfos[i].ParameterType.IsByRef;
-                    instance.MethodParametersByRef.TryAdd(currentMethodIdent, isByRef);
-                    currentMethodIdent++;
-                }
+                ret.Add(++index, item);
             }
 
-            var interfaces = serviceType.GetInterfaces();
-            foreach (var interfaceType in interfaces)
-            {
-                var methodInfos = interfaceType.GetMethods();
-                foreach (var mi in methodInfos)
-                {
-                    instance.InterfaceMethods.TryAdd(currentMethodIdent, mi);
-                    var parameterInfos = mi.GetParameters();
-                    var isByRef = new bool[parameterInfos.Length];
-                    for (int i = 0; i < isByRef.Length; i++)
-                        isByRef[i] = parameterInfos[i].ParameterType.IsByRef;
-                    instance.MethodParametersByRef.TryAdd(currentMethodIdent, isByRef);
-                    currentMethodIdent++;
-                }
-            }
+            return ret;
+        }
 
-            //Create a list of sync infos from the dictionary
-            var syncSyncInfos = new List<MethodSyncInfo>();
-            foreach (var kvp in instance.InterfaceMethods)
+        private ulong CalculateHash(string str)
+        {
+            var hashedValue = 3074457345618258791ul;
+            for (var i = 0; i < str.Length; i++)
             {
-                var parameters = kvp.Value.GetParameters();
-                var parameterTypes = new Type[parameters.Length];
-                for (var i = 0; i < parameters.Length; i++)
-                    parameterTypes[i] = parameters[i].ParameterType;
-                syncSyncInfos.Add(new MethodSyncInfo
-                {
-                    MethodIdent = kvp.Key,
-                    MethodName = kvp.Value.Name,
-                    ParameterTypes = parameterTypes
-                });
+                hashedValue += str[i];
+                hashedValue *= 3074457345618258799ul;
             }
-
-            var serviceSyncInfo = new ServiceSyncInfo
-            {
-                ServiceKeyIndex = keyIndex,
-                CompressionThreshold = _compressionThreshold,
-                UseCompression = _useCompression,
-                MethodInfos = syncSyncInfos.ToArray()
-            };
-            instance.ServiceSyncInfo = serviceSyncInfo;
-            return instance;
+            return hashedValue;
         }
     }
 }
