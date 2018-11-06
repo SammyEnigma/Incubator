@@ -23,9 +23,9 @@ namespace Incubator.SocketClient
 
         public long AddMoney(long a, long b)
         {
-            var objs = _client.InvokeMethod(_serviceHash, 1, new object[] { a, b });
+            var ret = _client.InvokeMethod(_serviceHash, 1, new object[] { a, b });
 
-            return (long)objs[0];
+            return (long)ret[0];
         }
 
         private ulong CalculateHash(string str)
