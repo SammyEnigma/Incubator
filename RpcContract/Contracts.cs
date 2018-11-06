@@ -21,8 +21,8 @@ namespace Incubator.RpcContract
         bool OutDecimal(decimal val);
 
         Guid GetId(string source, double weight, int quantity, DateTime dt);
-        ComplexResponse Get(Guid id, string label, double weight, out long quantity);
-        long TestLong(out long id1, out long id2);
+        ComplexResponse Get(Guid id, string label, double weight, long quantity);
+        long TestLong(long id1, long id2);
         List<string> GetItems(Guid id);
     }
 }

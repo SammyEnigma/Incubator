@@ -148,6 +148,27 @@ namespace RpcGenerator
                 {
                     return_type = ordered_methods[i].ReturnType.Name;
                     method_name = ordered_methods[i].Name;
+
+                    var parameters_str = new StringBuilder();
+                    foreach (var item in ordered_methods[i].GetParameters())
+                    {
+                        if (item.ParameterType.IsByRef || item.ParameterType.IsMarshalByRef)
+                        {
+                            throw new Exception("目前暂不支持引用传参调用");
+                        }
+
+                        var ptype = string.Empty;
+                        if (item.ParameterType.IsGenericType)
+                        {
+                            ptype = GenericTypeString(item.ParameterType);
+                        }
+                        else
+                        {
+                            ptype = item.ParameterType.Name;
+                        }
+                        parameters_str.Append(string.Format("{0} {1}", ptype, item.Name));
+                    }
+
                     parameters = string.Join(", ", ordered_methods[i].GetParameters().Select(p => string.Format("{0} {1}", p.ParameterType.Name, p.Name)));
                     if (i == 0)
                     {
@@ -194,6 +215,18 @@ namespace RpcGenerator
                 }
                 File.WriteAllText(Path.Combine(output_path, proxy_type + ".cs"), out_str);
             }
+        }
+
+        static string GenericTypeString(Type t)
+        {
+            if (!t.IsGenericType)
+                return t.Name;
+            var genericTypeName = t.GetGenericTypeDefinition().Name;
+            genericTypeName = genericTypeName.Substring(0,
+                genericTypeName.IndexOf('`'));
+            var genericArgs = string.Join(",", t.GetGenericArguments().Select(ta => GenericTypeString(ta)).ToArray());
+
+            return genericTypeName + "<" + genericArgs + ">";
         }
 
         static void EnsurePath(string path)
