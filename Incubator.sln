@@ -21,6 +21,8 @@ Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "RpcContract", "RpcContract\
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "RpcGenerator", "RpcGenerator\RpcGenerator.csproj", "{1CE28DD8-A8B0-44F3-B120-E98C442117A1}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Libuv", "Libuv\Libuv.csproj", "{64643FD5-ABCE-4E7E-AD76-4044818869F7}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -63,6 +65,10 @@ Global
 		{1CE28DD8-A8B0-44F3-B120-E98C442117A1}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{1CE28DD8-A8B0-44F3-B120-E98C442117A1}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{1CE28DD8-A8B0-44F3-B120-E98C442117A1}.Release|Any CPU.Build.0 = Release|Any CPU
+		{64643FD5-ABCE-4E7E-AD76-4044818869F7}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{64643FD5-ABCE-4E7E-AD76-4044818869F7}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{64643FD5-ABCE-4E7E-AD76-4044818869F7}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{64643FD5-ABCE-4E7E-AD76-4044818869F7}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
