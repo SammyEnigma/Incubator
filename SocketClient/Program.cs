@@ -1,6 +1,7 @@
 ﻿using Incubator.RpcContract;
 using Incubator.SocketClient.Rpc;
 using System;
+using System.Collections.Generic;
 using System.Net;
 
 namespace Incubator.SocketClient
@@ -26,6 +27,36 @@ namespace Incubator.SocketClient
             var ret = _client.InvokeMethod(_serviceHash, 1, new object[] { a, b });
 
             return (long)ret[0];
+        }
+
+        public ComplexResponse Get(Guid id, string label, double weight, long quantity)
+        {
+            throw new NotImplementedException();
+        }
+
+        public decimal GetDecimal(decimal input)
+        {
+            throw new NotImplementedException();
+        }
+
+        public Guid GetId(string source, double weight, int quantity, DateTime dt)
+        {
+            throw new NotImplementedException();
+        }
+
+        public List<string> GetItems(Guid id)
+        {
+            throw new NotImplementedException();
+        }
+
+        public bool OutDecimal(decimal val)
+        {
+            throw new NotImplementedException();
+        }
+
+        public long TestLong(long id1, long id2)
+        {
+            throw new NotImplementedException();
         }
 
         private ulong CalculateHash(string str)
