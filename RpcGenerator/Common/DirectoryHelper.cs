@@ -69,7 +69,7 @@ namespace Generator.Common
             return string.Empty;
         }
 
-        public void Redirect(string path)
+        public static void Redirect(string path)
         {
             System.Diagnostics.Process.Start(path);
         }

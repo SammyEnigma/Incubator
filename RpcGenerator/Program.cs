@@ -40,6 +40,8 @@ namespace RpcGenerator
                 {
                     Generate(input_path, output_path);
 
+                    DirHelper.Redirect(output_path);
+
                     Print("生成完毕！");
                     break;
                 }
@@ -87,6 +89,11 @@ namespace RpcGenerator
                     }
                 }
             }
+            catch (GeneratorParseException ex)
+            {
+                Print(ex.Message, 3);
+                return false;
+            }
             catch (Exception ex)
             {
                 Print(ex.Message, 3);
@@ -105,7 +112,7 @@ namespace RpcGenerator
             var compilation = CSharpCompilation.Create("proxy.dll", new[] { tree },
                 references: new MetadataReference[] {
                     MetadataReference.CreateFromFile(typeof(object).Assembly.Location),
-                    MetadataReference.CreateFromFile(typeof(Enumerable).Assembly.Location) },
+                    MetadataReference.CreateFromFile(typeof(Enumerable).Assembly.Location)},
                 options: new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary));
 
             Assembly compiledAssembly = null;
@@ -131,11 +138,15 @@ namespace RpcGenerator
                 }
             }
 
+            var ref_types = new StringBuilder();
             var types = compiledAssembly.ExportedTypes;
             foreach (var type in types)
             {
                 if (!type.IsInterface)
+                {
+                    ref_types.Append(GetSourceCode(type));
                     continue;
+                }
 
                 var methods_str = new StringBuilder();
                 var ordered_methods = type.GetMethods(BindingFlags.Instance | BindingFlags.Public)
@@ -146,7 +157,7 @@ namespace RpcGenerator
                 var parameters = string.Empty;
                 for (int i = 0; i < ordered_methods.Length; i++)
                 {
-                    return_type = ordered_methods[i].ReturnType.Name;
+                    return_type = GenericTypeString(ordered_methods[i].ReturnType);
                     method_name = ordered_methods[i].Name;
 
                     var parameters_str = new StringBuilder();
@@ -154,7 +165,7 @@ namespace RpcGenerator
                     {
                         if (item.ParameterType.IsByRef || item.ParameterType.IsMarshalByRef)
                         {
-                            throw new Exception("目前暂不支持引用传参调用");
+                            throw new GeneratorParseException(string.Format("类型{0}的方法{1}(...{2}...)存在按引用传参调用的情况，目前暂不支持", type.Name, method_name, item.ParameterType.Name));
                         }
 
                         var ptype = string.Empty;
@@ -166,31 +177,30 @@ namespace RpcGenerator
                         {
                             ptype = item.ParameterType.Name;
                         }
-                        parameters_str.Append(string.Format("{0} {1}", ptype, item.Name));
+                        parameters_str.Append(string.Format("{0} {1}, ", ptype, item.Name));
                     }
 
-                    parameters = string.Join(", ", ordered_methods[i].GetParameters().Select(p => string.Format("{0} {1}", p.ParameterType.Name, p.Name)));
                     if (i == 0)
                     {
-                        methods_str.AppendLine(string.Format("public {0} {1}({2})", return_type, method_name, parameters));
+                        methods_str.AppendLine(string.Format("public {0} {1}({2})", return_type, method_name, parameters_str.ToString().TrimEnd(", ")));
                     }
                     else
                     {
-                        methods_str.AppendLine(string.Format("\tpublic {0} {1}({2})", return_type, method_name, parameters));
+                        methods_str.AppendLine(string.Format("\t\tpublic {0} {1}({2})", return_type, method_name, parameters_str.ToString().TrimEnd(", ")));
                     }
 
-                    methods_str.AppendLine("\t{");
-                    methods_str.AppendLine(string.Format("\t\tvar ret = _client.InvokeMethod(_serviceHash, {0}, new object[] {{ {1} }});", ++index, string.Join(", ", ordered_methods[i].GetParameters().Select(p => p.Name))));
-                    methods_str.AppendLine(string.Format("\t\treturn ({0})ret[0];", return_type));
+                    methods_str.AppendLine("\t\t{");
+                    methods_str.AppendLine(string.Format("\t\t\tvar ret = _client.InvokeMethod(_serviceHash, {0}, new object[] {{ {1} }});", ++index, string.Join(", ", ordered_methods[i].GetParameters().Select(p => p.Name))));
+                    methods_str.AppendLine(string.Format("\t\t\treturn ({0})ret[0];", return_type));
 
                     if (i < ordered_methods.Length - 1)
                     {
-                        methods_str.AppendLine("\t}");
+                        methods_str.AppendLine("\t\t}");
                         methods_str.AppendLine();
                     }
                     else
                     {
-                        methods_str.AppendLine("\t}");
+                        methods_str.AppendLine("\t\t}");
                     }
                 }
 
@@ -202,12 +212,13 @@ namespace RpcGenerator
                    name_space,
                    proxy_type,
                    proxy_derive,
-                   client_type, 
-                   proxy_type, 
-                   client_type, 
-                   proxy_derive, 
-                   proxy_derive, 
-                   methods_str.ToString());
+                   client_type,
+                   proxy_type,
+                   client_type,
+                   proxy_derive,
+                   proxy_derive,
+                   methods_str.ToString(),
+                   ref_types.ToString());
 
                 if (!Directory.Exists(output_path))
                 {
@@ -227,6 +238,36 @@ namespace RpcGenerator
             var genericArgs = string.Join(",", t.GetGenericArguments().Select(ta => GenericTypeString(ta)).ToArray());
 
             return genericTypeName + "<" + genericArgs + ">";
+        }
+
+        static string GetSourceCode(Type t)
+        {
+            var sb = new StringBuilder();
+            if (t.IsClass)
+                sb.AppendFormat("public class {0}\n\t{{\n", t.Name);
+            if (t.IsValueType && !t.IsEnum)
+                sb.AppendFormat("public struct {0}\n\t{{\n", t.Name);
+            if (t.IsEnum)
+                sb.AppendFormat("public enum {0}\n\t{{\n", t.Name);
+
+            foreach (var field in t.GetFields())
+            {
+                sb.AppendFormat("\t\tpublic {0} {1};\n",
+                    field.FieldType.Name,
+                    field.Name);
+            }
+
+            foreach (var prop in t.GetProperties())
+            {
+                sb.AppendFormat("\t\tpublic {0} {1} {{{2}{3}}}\n",
+                    prop.PropertyType.Name,
+                    prop.Name,
+                    prop.CanRead ? " get;" : "",
+                    prop.CanWrite ? " set; " : " ");
+            }
+
+            sb.Append("\t}");
+            return sb.ToString();
         }
 
         static void EnsurePath(string path)

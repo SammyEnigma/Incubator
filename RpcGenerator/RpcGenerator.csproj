@@ -194,6 +194,7 @@
     <Compile Include="Common\ConsoleProgress.cs" />
     <Compile Include="Common\DirectoryHelper.cs" />
     <Compile Include="Common\StringExtension.cs" />
+    <Compile Include="GeneratorParseException.cs" />
     <Compile Include="Program.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />
     <Content Include="ServiceTemplate.txt">
